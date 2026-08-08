@@ -121,7 +121,7 @@ const updateMe = async (req, res) => {
         }
 
         const updatedUser = await prisma.user.update({
-            where: { id: req.user.id },  // Use id not _id
+            where: { id: req.user._id },  // Use id not _id
             data: { name, email }
         });
 
@@ -153,25 +153,53 @@ const updateMe = async (req, res) => {
 };
 const deleteMe = async (req, res) => {
     try {
-        const user = await prisma.user.delete({
-            where: { id: req.user._id }
-        });
-
-        if (!user) {
-            return res.status(404).json({
-                message: "User not found"
+        const userId = req.user.id || req.user._id;
+        
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                message: "User ID not found in token"
             });
         }
 
-        // If you're using cookie authentication
+        // Step 1: Check if user owns any teams
+        const ownedTeams = await prisma.team.findMany({
+            where: { createdById: userId },
+            include: { members: true }
+        });
+
+        // Step 2: Handle owned teams (transfer or delete)
+        for (const team of ownedTeams) {
+            const otherMembers = team.members.filter(m => m.userId !== userId);
+            
+            if (otherMembers.length > 0) {
+                // Transfer ownership to first other member
+                await prisma.team.update({
+                    where: { id: team.id },
+                    data: { createdById: otherMembers[0].userId }
+                });
+            } else {
+                // No other members — delete the team (cascade will handle rest)
+                await prisma.team.delete({ where: { id: team.id } });
+            }
+        }
+
+        // Step 3: Now safe to delete user
+        await prisma.user.delete({
+            where: { id: userId }
+        });
+
         res.clearCookie("token");
 
         return res.status(200).json({
+            success: true,
             message: "Account deleted successfully"
         });
 
     } catch (err) {
+        console.error("Delete error:", err);
         return res.status(500).json({
+            success: false,
             message: "Something went wrong"
         });
     }

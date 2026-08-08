@@ -20,6 +20,7 @@ model User {
   transactionsCreated Transaction[] @relation("TransactionCreator")
   auditLogs AuditLog[]
   ownedAccounts Account[]
+  sentInvitations   TeamInvitation[] @relation("InvitationSender")
 
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
@@ -36,6 +37,7 @@ model Team {
   budget Budget?
   accounts Account[]
   transactions Transaction[]
+  invitations TeamInvitation[]
 
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
@@ -46,9 +48,9 @@ model Team {
 model TeamMember {
   id String @id @default(uuid()) @db.Uuid
   teamId  String @map("team_id") @db.Uuid
-  team Team @relation(fields: [teamId ], references: [id])
+  team Team @relation(fields: [teamId ], references: [id], onDelete: Cascade)
   userId String @map("user_id") @db.Uuid
-  user User @relation("TeamMember",fields: [userId], references: [id])
+  user User @relation("TeamMember",fields: [userId], references: [id], onDelete: Cascade)
   role String  @default("member") @db.VarChar(20)
   joinedAt    DateTime @default(now()) @map("joined_at")
 
@@ -57,11 +59,36 @@ model TeamMember {
   @@index([userId], map: "idx_team_members_user")
 }
 
+model TeamInvitation {
+  id String @id @default(uuid()) @db.Uuid
+
+  teamId String @map("team_id") @db.Uuid
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  email String @db.VarChar(255)
+
+  invitedById String @map("invited_by") @db.Uuid
+  invitedBy User @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  role String @default("member") @db.VarChar(20)
+
+  token String @unique
+
+  status String @default("pending") @db.VarChar(20)
+
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([teamId])
+  @@index([email])
+  @@map("team_invitations")
+}
+
 model Budget {
   id String @id @default(uuid()) @db.Uuid
 
   teamId String @unique @map("team_id") @db.Uuid
-  team   Team   @relation(fields: [teamId], references: [id])
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   totalBudget Decimal @map("total_budget") @db.Decimal(14, 2)
   currency    String  @default("INR") @db.Char(3)
@@ -76,12 +103,12 @@ model Account {
   id String @id @default(uuid()) @db.Uuid
 
   teamId String @map("team_id") @db.Uuid
-  team   Team   @relation(fields: [teamId], references: [id])
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   accountType String @map("account_type") @db.VarChar(30)
 
   ownerUserId String? @map("owner_user_id") @db.Uuid
-  ownerUser   User?   @relation(fields: [ownerUserId], references: [id])
+  ownerUser   User?   @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
 
   name String @db.VarChar(100)
 
@@ -98,10 +125,10 @@ model Transaction {
   id String @id @default(uuid()) @db.Uuid
 
   teamId String @map("team_id") @db.Uuid
-  team   Team   @relation(fields: [teamId], references: [id])
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   createdById String @map("created_by") @db.Uuid
-  createdBy   User   @relation("TransactionCreator",fields: [createdById], references: [id])
+  createdBy   User   @relation("TransactionCreator",fields: [createdById], references: [id], onDelete: SetNull)
 
   transactionType String @map("transaction_type") @db.VarChar(30)
 
@@ -122,10 +149,10 @@ model LedgerEntry {
   id String @id @default(uuid()) @db.Uuid
 
   transactionId String @map("transaction_id") @db.Uuid
-  transaction   Transaction @relation(fields: [transactionId], references: [id])
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
 
   accountId String @map("account_id") @db.Uuid
-  account   Account @relation(fields: [accountId], references: [id])
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   debit  Decimal @default(0) @db.Decimal(14, 2)
   credit Decimal @default(0) @db.Decimal(14, 2)
@@ -141,7 +168,7 @@ model AuditLog {
   id String @id @default(uuid()) @db.Uuid
 
   userId String? @map("user_id") @db.Uuid
-  user   User?   @relation(fields: [userId], references: [id])
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   entityType String? @map("entity_type") @db.VarChar(50)
   entityId   String? @map("entity_id") @db.Uuid
