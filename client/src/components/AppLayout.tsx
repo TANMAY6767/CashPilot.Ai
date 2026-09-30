@@ -10,11 +10,11 @@ import {
 import { useAuth } from '@/context/AuthContext';
 
 const navItems = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
+  { to: '/', label: 'Home', icon: LayoutDashboard, end: true },
+  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/teams', label: 'Teams', icon: Users },
-  { to: '/expenses', label: 'Expenses', icon: Receipt },
-  { to: '/budgets', label: 'Budgets', icon: Wallet },
-  { to: '/insights', label: 'Insights', icon: Sparkles },
+  { to: '/expenses', label: 'Transactions', icon: Receipt },
+  { to: '/organization', label: 'Organization', icon: Sparkles },
 ];
 
 export default function AppLayout() {

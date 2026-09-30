@@ -1,11 +1,11 @@
 import prisma from "../prisma/client.js";
 import bcrypt from "bcrypt"
 import { getToken } from "../services/tokens.js";
-const createUser = async(req,res) => {
-    try{
-        const { name, email, password} = req.body;
+const createUser = async (req, res) => {
+    try {
+        const { name, email, password } = req.body;
 
-        if( !name || !email || !password ){
+        if (!name || !email || !password) {
             return res.status(400).json({
                 message: "Please fill all the required details."
             });
@@ -13,16 +13,16 @@ const createUser = async(req,res) => {
 
         const userExist = await prisma.user.findUnique({
             where: {
-              email:email
+                email: email
             }
         });
 
-        if(userExist){
-           return res.status(409).json({
+        if (userExist) {
+            return res.status(409).json({
                 error: "User already exists",
             });
         }
-        const hashedPassword = await bcrypt.hash(password,10);
+        const hashedPassword = await bcrypt.hash(password, 10);
 
         const user = await prisma.user.create({
             data: {
@@ -35,8 +35,8 @@ const createUser = async(req,res) => {
         const token = getToken(user);
 
         res.cookie("token", token, {
-            httpOnly:true,
-            sameSite:"strict",
+            httpOnly: true,
+            sameSite: "strict",
         });
 
         return res.status(201).json({
@@ -44,13 +44,13 @@ const createUser = async(req,res) => {
             user,
         });
 
-    }catch(err){
+    } catch (err) {
         res.status(500).json("something went wrong");
     }
 
 };
 
-const getAllUsers = async(req,res) => {
+const getAllUsers = async (req, res) => {
     try {
         const users = await prisma.user.findMany();
         return res.status(200).json({
@@ -60,13 +60,13 @@ const getAllUsers = async(req,res) => {
     } catch (error) {
         res.status(500).json("something went wrong");
     }
-} 
+}
 
-const loginUser = async(req,res) => {
+const loginUser = async (req, res) => {
     try {
-        const {email, password} = req.body;
-        
-        if( !email || !password){
+        const { email, password } = req.body;
+        console.log("tannmay", email, password);
+        if (!email || !password) {
             return res.status(400).json({
                 message: "Please fill all the required details."
             });
@@ -74,14 +74,14 @@ const loginUser = async(req,res) => {
         const user = await prisma.user.findUnique({
             where: { email }
         });
-        console.log("btrtbrthrt",user);
-        if(!user){
+        console.log("btrtbrthrt", user);
+        if (!user) {
             return res.status(404).json({
                 message: "User not found"
             });
         }
         const isMatch = await bcrypt.compare(password, user.passwordHash);
-        
+
         if (!isMatch) {
             return res.status(401).json({
                 message: "Invalid credentials"
@@ -89,14 +89,23 @@ const loginUser = async(req,res) => {
         }
 
         const token = getToken(user);
+
         res.cookie("token", token, {
             httpOnly: true,
-            sameSite: "strict",
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "lax",
+            maxAge: 7 * 24 * 60 * 60 * 1000,
         });
 
         return res.status(200).json({
             message: "User loggedIn successfully",
-            user,
+            user: {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                createdAt: user.createdAt,
+                updatedAt: user.updatedAt,
+            },
         });
 
     } catch (error) {
@@ -154,7 +163,7 @@ const updateMe = async (req, res) => {
 const deleteMe = async (req, res) => {
     try {
         const userId = req.user.id || req.user._id;
-        
+
         if (!userId) {
             return res.status(401).json({
                 success: false,
@@ -171,7 +180,7 @@ const deleteMe = async (req, res) => {
         // Step 2: Handle owned teams (transfer or delete)
         for (const team of ownedTeams) {
             const otherMembers = team.members.filter(m => m.userId !== userId);
-            
+
             if (otherMembers.length > 0) {
                 // Transfer ownership to first other member
                 await prisma.team.update({
@@ -206,6 +215,7 @@ const deleteMe = async (req, res) => {
 };
 const getMe = async (req, res) => {
     try {
+        console.log("token is :",req.user._id);
         const user = await prisma.user.findUnique({
             where: { id: req.user._id }
         });
@@ -223,4 +233,17 @@ const getMe = async (req, res) => {
         });
     }
 };
-export {createUser,getAllUsers,getMe,deleteMe,updateMe,loginUser};
+
+const logoutUser = (req, res) => {
+  res.clearCookie("token", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+  });
+
+  return res.status(200).json({
+    message: "Logged out successfully",
+  });
+};
+
+export { createUser, getAllUsers, getMe, deleteMe, updateMe, loginUser ,logoutUser};

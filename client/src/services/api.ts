@@ -45,30 +45,85 @@ const delay = <T>(value: T, ms = 250): Promise<T> =>
 // ---------------------------------------------------------------------------
 
 export interface AuthResult {
+  message: string;
   user: User;
-  token: string; // placeholder for a real JWT
 }
 
-export async function login(email: string, _password: string): Promise<AuthResult> {
-  // TODO: POST /auth/login -> { user, token }
-  return delay({ user: { ...mockCurrentUser, email }, token: 'mock-jwt-token' });
+export async function login(
+  email: string,
+  password: string,
+): Promise<AuthResult> {
+  const res = await fetch('http://localhost:8000/users/login', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include',
+    body: JSON.stringify({
+      email,
+      password,
+    }),
+  });
+
+  if (!res.ok) {
+    const error = await res.json();
+
+    throw new Error(error.message || 'Login failed');
+  }
+
+  return res.json();
 }
 
 export async function signup(
   name: string,
   email: string,
-  _password: string,
+  password: string,
 ): Promise<AuthResult> {
-  // TODO: POST /auth/signup -> { user, token }
-  return delay({
-    user: { id: 'u1', name, email },
-    token: 'mock-jwt-token',
+  const res = await fetch('http://localhost:8000/users', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include',
+    body: JSON.stringify({
+      name,
+      email,
+      password,
+    }),
   });
+
+  if (!res.ok) {
+    const error = await res.json();
+
+    throw new Error(error.message || 'Signup failed');
+  }
+
+  return res.json();
 }
 
 export async function getCurrentUser(): Promise<User> {
-  // TODO: GET /auth/me (with Authorization: Bearer <token>)
-  return delay(mockCurrentUser);
+  const res = await fetch('http://localhost:8000/users/me', {
+    method: 'GET',
+    credentials: 'include',
+  });
+
+  if (!res.ok) {
+    throw new Error('Not authenticated');
+  }
+
+  const data = await res.json();
+  return data;
+}
+
+export async function logout(): Promise<void> {
+  const res = await fetch('http://localhost:8000/users/logout', {
+    method: 'POST',
+    credentials: 'include',
+  });
+
+  if (!res.ok) {
+    throw new Error('Logout failed');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -176,13 +231,13 @@ export async function createExpense(input: NewExpenseInput): Promise<Expense> {
   const splitBetween =
     input.splitMethod === 'equal'
       ? input.splitBetween.map((s) => ({
-          memberId: s.memberId,
-          amount: Math.round((total / input.splitBetween.length) * 100) / 100,
-        }))
+        memberId: s.memberId,
+        amount: Math.round((total / input.splitBetween.length) * 100) / 100,
+      }))
       : input.splitBetween.map((s) => ({
-          memberId: s.memberId,
-          amount: s.amount ?? 0,
-        }));
+        memberId: s.memberId,
+        amount: s.amount ?? 0,
+      }));
 
   const expense: Expense = {
     id: `e${Date.now()}`,

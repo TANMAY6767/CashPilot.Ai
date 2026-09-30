@@ -6,7 +6,7 @@ import type { Team } from '@/types';
 import PageHeader from '@/components/PageHeader';
 import TeamCard from '@/components/TeamCard';
 
-export default function DashboardPage() {
+export default function TransactionPage() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -24,11 +24,11 @@ export default function DashboardPage() {
     <>
     <div>
             <h2 className="text-3xl font-bold">
-              Dashboard
+              Transaction
             </h2>
 
             <p className="mt-2 text-gray-600">
-              Manage your Dashboard here.
+              Manage your Transaction here.
             </p>
           </div>
     </>

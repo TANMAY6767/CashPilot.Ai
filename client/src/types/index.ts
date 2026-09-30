@@ -6,6 +6,17 @@ export interface User {
   email: string;
 }
 
+
+export interface Organization {
+  id: string;
+  name: string;
+  createdBy: string;
+  createdAt:Date;
+  _count?: {
+    members: number;
+  };
+}
+
 export interface Team {
   id: string;
   name: string;

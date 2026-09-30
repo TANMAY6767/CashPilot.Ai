@@ -12,7 +12,7 @@ async function sendEmail({
 }) {
   try {
     const invitationUrl =
-        `http://localhost:8000/team/invite/accept/${token}`;
+        `http://localhost:8000/teams/invite/accept/${token}`;
     const { data, error } = await resend.emails.send({
       from: 'CashFlow <noreply@tanmaydhole.in>',
       to: email,

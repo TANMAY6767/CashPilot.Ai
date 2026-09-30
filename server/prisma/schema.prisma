@@ -1,4 +1,3 @@
-
 generator client {
   provider = "prisma-client"
   output   = "../generated/prisma"
@@ -11,64 +10,113 @@ datasource db {
 
 model User {
   id String @id @default(uuid()) @db.Uuid
-  name String @db.VarChar(100)
-  email String @unique @db.VarChar(255)
+
+  name         String @db.VarChar(100)
+  email        String @unique @db.VarChar(255)
   passwordHash String @map("password_hash")
 
-  teamsCreated Team[] @relation("TeamCreator")
-  teamMembers TeamMember[] @relation("TeamMember")
-  transactionsCreated Transaction[] @relation("TransactionCreator")
-  auditLogs AuditLog[]
-  ownedAccounts Account[]
-  sentInvitations   TeamInvitation[] @relation("InvitationSender")
+  organizationsCreated Organization[]       @relation("OrganizationCreator")
+  organizationMembers  OrganizationMember[] @relation("OrganizationMember")
 
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  teamsCreated Team[]       @relation("TeamCreator")
+  teamMembers  TeamMember[] @relation("TeamMember")
+
+  transactionsCreated Transaction[]    @relation("TransactionCreator")
+  auditLogs           AuditLog[]
+  ownedAccounts       Account[]
+  sentInvitations     TeamInvitation[] @relation("InvitationSender")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
   @@map("users")
+}
+
+model Organization {
+  id String @id @default(uuid()) @db.Uuid
+
+  name String @db.VarChar(100)
+
+  createdById String @map("created_by") @db.Uuid
+  createdBy   User   @relation("OrganizationCreator", fields: [createdById], references: [id])
+
+  members OrganizationMember[]
+  teams   Team[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([createdById])
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id String @id @default(uuid()) @db.Uuid
+
+  organizationId String       @map("organization_id") @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  userId String @map("user_id") @db.Uuid
+  user   User   @relation("OrganizationMember", fields: [userId], references: [id], onDelete: Cascade)
+
+  role String @default("member") @db.VarChar(20)
+
+  joinedAt DateTime @default(now()) @map("joined_at")
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@map("organization_members")
 }
 
 model Team {
   id String @id @default(uuid()) @db.Uuid
+
   name String @db.VarChar(100)
+
+  organizationId String       @map("organization_id") @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
   createdById String @map("created_by") @db.Uuid
-  createdBy   User @relation("TeamCreator",fields: [createdById], references: [id])
+  createdBy   User   @relation("TeamCreator", fields: [createdById], references: [id])
 
-  members  TeamMember[]
-  budget Budget?
-  accounts Account[]
+  members      TeamMember[]
+  budget       Budget?
+  accounts     Account[]
   transactions Transaction[]
-  invitations TeamInvitation[]
+  invitations  TeamInvitation[]
 
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
-  @@map("teams")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId])
   @@index([createdById])
+  @@map("teams")
 }
 
 model TeamMember {
-  id String @id @default(uuid()) @db.Uuid
-  teamId  String @map("team_id") @db.Uuid
-  team Team @relation(fields: [teamId ], references: [id], onDelete: Cascade)
-  userId String @map("user_id") @db.Uuid
-  user User @relation("TeamMember",fields: [userId], references: [id], onDelete: Cascade)
-  role String  @default("member") @db.VarChar(20)
-  joinedAt    DateTime @default(now()) @map("joined_at")
+  id       String   @id @default(uuid()) @db.Uuid
+  teamId   String   @map("team_id") @db.Uuid
+  team     Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId   String   @map("user_id") @db.Uuid
+  user     User     @relation("TeamMember", fields: [userId], references: [id], onDelete: Cascade)
+  role     String   @default("member") @db.VarChar(20)
+  joinedAt DateTime @default(now()) @map("joined_at")
 
   @@unique([teamId, userId])
-  @@map("team_members")
   @@index([userId], map: "idx_team_members_user")
+  @@map("team_members")
 }
 
 model TeamInvitation {
   id String @id @default(uuid()) @db.Uuid
 
   teamId String @map("team_id") @db.Uuid
-  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   email String @db.VarChar(255)
 
   invitedById String @map("invited_by") @db.Uuid
-  invitedBy User @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Cascade)
+  invitedBy   User   @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Cascade)
 
   role String @default("member") @db.VarChar(20)
 
@@ -116,9 +164,9 @@ model Account {
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  @@map("accounts")
   @@index([teamId])
   @@index([ownerUserId])
+  @@map("accounts")
 }
 
 model Transaction {
@@ -128,7 +176,7 @@ model Transaction {
   team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   createdById String @map("created_by") @db.Uuid
-  createdBy   User   @relation("TransactionCreator",fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy   User   @relation("TransactionCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   transactionType String @map("transaction_type") @db.VarChar(30)
 
@@ -140,18 +188,18 @@ model Transaction {
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  @@map("transactions")
   @@index([createdById])
   @@index([teamId], map: "idx_transactions_team")
+  @@map("transactions")
 }
 
 model LedgerEntry {
   id String @id @default(uuid()) @db.Uuid
 
-  transactionId String @map("transaction_id") @db.Uuid
+  transactionId String      @map("transaction_id") @db.Uuid
   transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
 
-  accountId String @map("account_id") @db.Uuid
+  accountId String  @map("account_id") @db.Uuid
   account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   debit  Decimal @default(0) @db.Decimal(14, 2)
@@ -159,9 +207,9 @@ model LedgerEntry {
 
   description String?
 
-  @@map("ledger_entries")
   @@index([transactionId], map: "idx_ledger_transaction")
   @@index([accountId], map: "idx_ledger_account")
+  @@map("ledger_entries")
 }
 
 model AuditLog {
@@ -180,7 +228,7 @@ model AuditLog {
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  @@map("audit_logs")
   @@index([userId])
   @@index([entityType, entityId])
+  @@map("audit_logs")
 }

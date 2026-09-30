@@ -1,3 +1,9 @@
+
+// Auth is client-side only for now. The token is stashed in localStorage so a
+// real JWT can drop in later with minimal changes — just swap the api.ts
+// auth functions and the consumer code here stays the same.
+
+
 import {
   createContext,
   useContext,
@@ -9,75 +15,84 @@ import {
 import * as api from '@/services/api';
 import type { User } from '@/types';
 
-// Auth is client-side only for now. The token is stashed in localStorage so a
-// real JWT can drop in later with minimal changes — just swap the api.ts
-// auth functions and the consumer code here stays the same.
 
 interface AuthState {
   user: User | null;
-  token: string | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (name: string, email: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
-const TOKEN_KEY = 'tbt_token';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(() =>
-    localStorage.getItem(TOKEN_KEY),
-  );
   const [loading, setLoading] = useState(true);
 
-  // On mount, if a token exists, "restore" the session. Later this becomes a
-  // real GET /auth/me with the token.
   useEffect(() => {
-    let cancelled = false;
-    if (!token) {
-      setLoading(false);
-      return;
+  let cancelled = false;
+
+  const restoreSession = async () => {
+    try {
+      const u = await api.getCurrentUser();
+      console.log(u);
+      if (!cancelled) {
+        setUser(u);
+      }
+    } catch {
+      if (!cancelled) {
+        setUser(null);
+      }
+    } finally {
+      if (!cancelled) {
+        setLoading(false);
+      }
     }
-    api
-      .getCurrentUser()
-      .then((u) => {
-        if (!cancelled) setUser(u);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
+  };
+
+  restoreSession();
+  return () => {
+    cancelled = true;
+  };
+}, []);
+
 
   const login = async (email: string, password: string) => {
-    const { user: u, token: t } = await api.login(email, password);
-    localStorage.setItem(TOKEN_KEY, t);
-    setToken(t);
-    setUser(u);
-  };
+  const { user } = await api.login(email, password);
 
-  const signup = async (name: string, email: string, password: string) => {
-    const { user: u, token: t } = await api.signup(name, email, password);
-    localStorage.setItem(TOKEN_KEY, t);
-    setToken(t);
-    setUser(u);
-  };
+  setUser(user);
+};
 
-  const logout = () => {
-    localStorage.removeItem(TOKEN_KEY);
-    setToken(null);
+  const signup = async (
+  name: string,
+  email: string,
+  password: string,
+) => {
+  const { user } = await api.signup(name, email, password);
+
+  setUser(user);
+};
+
+  const logout = async () => {
+  try {
+    await api.logout();
+  } finally {
     setUser(null);
-  };
+  }
+};
 
   const value = useMemo<AuthState>(
-    () => ({ user, token, loading, login, signup, logout }),
-    [user, token, loading],
-  );
+  () => ({
+    user,
+    loading,
+    login,
+    signup,
+    logout,
+  }),
+  [user, loading],
+);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
