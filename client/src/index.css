@@ -1,3 +1,94 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  color-scheme: light;
+  background: #f9fafb;
+}
+
+:root.dark {
+  color-scheme: dark;
+  background: #111827;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+.app-shell,
+.app-sidebar,
+.app-sidebar > div,
+main {
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
+}
+
+.theme-switch {
+  display: inline-flex;
+  width: 2rem;
+  height: 1.125rem;
+  align-items: center;
+  border-radius: 9999px;
+  background: #d1d5db;
+  padding: 2px;
+  transition: background-color 180ms ease;
+}
+
+.theme-switch-on {
+  background: #4f46e5;
+}
+
+.theme-switch-thumb {
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 9999px;
+  background: white;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 18%);
+  transition: transform 180ms ease;
+}
+
+.theme-switch-on .theme-switch-thumb {
+  transform: translateX(0.875rem);
+}
+
+.dark body {
+  background-color: #111827;
+  color: #f3f4f6;
+}
+
+.dark .bg-white { background-color: #1f2937; }
+.dark .bg-gray-50 { background-color: #111827; }
+.dark .bg-gray-100 { background-color: #374151; }
+.dark .bg-gray-900 { background-color: #4f46e5; }
+.dark .text-black { color: #f9fafb; }
+.dark .text-gray-900,
+.dark .text-gray-800,
+.dark .text-gray-700 { color: #f3f4f6; }
+.dark .text-gray-600,
+.dark .text-gray-500 { color: #cbd5e1; }
+.dark .text-gray-400 { color: #9ca3af; }
+.dark .border-gray-200,
+.dark .border-gray-300,
+.dark .border { border-color: #374151; }
+.dark .hover\:bg-gray-100:hover { background-color: #374151; }
+.dark .hover\:bg-gray-50:hover { background-color: #374151; }
+.dark .hover\:text-gray-900:hover,
+.dark .hover\:text-black:hover { color: #fff; }
+.dark .bg-blue-400 { background-color: #1e3a5f; }
+.dark .bg-gray-50.text-left { background-color: #374151; }
+
+.dark input,
+.dark select,
+.dark textarea {
+  border-color: #4b5563;
+  background-color: #111827;
+  color: #f3f4f6;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder { color: #9ca3af; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; }
+}
