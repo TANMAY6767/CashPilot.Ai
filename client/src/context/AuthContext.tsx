@@ -1,9 +1,4 @@
 
-// Auth is client-side only for now. The token is stashed in localStorage so a
-// real JWT can drop in later with minimal changes — just swap the api.ts
-// auth functions and the consumer code here stays the same.
-
-
 import {
   createContext,
   useContext,
@@ -33,11 +28,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
   let cancelled = false;
+  const handleSessionExpired = () => {
+    if (!cancelled) {
+      setUser(null);
+      setLoading(false);
+    }
+  };
+  window.addEventListener('auth:expired', handleSessionExpired);
 
   const restoreSession = async () => {
     try {
+      await api.restoreAccessToken();
       const u = await api.getCurrentUser();
-      console.log(u);
       if (!cancelled) {
         setUser(u);
       }
@@ -55,6 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   restoreSession();
   return () => {
     cancelled = true;
+    window.removeEventListener('auth:expired', handleSessionExpired);
   };
 }, []);
 
@@ -79,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   try {
     await api.logout();
   } finally {
+    api.clearAccessToken();
     setUser(null);
   }
 };

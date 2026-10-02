@@ -11,6 +11,7 @@ import {
   getMyOrganizations,
   getMyTeams,
   deleteMe,
+  refreshAccessToken
 } from "../controllers/user.controller.js";
 
 import { checkAuth } from "../middleware/index.js";
@@ -27,15 +28,14 @@ router.post("/", createUser);
 
 // Login
 router.post("/login", loginUser);
-
-
+router.post("/refresh", refreshAccessToken);
+router.post("/logout", logoutUser);
 // ============================================================
 // AUTHENTICATED ROUTES
 // ============================================================
 
 router.use(checkAuth);
 
-router.post("/logout", logoutUser);
 
 router
   .route("/me")

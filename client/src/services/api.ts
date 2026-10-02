@@ -40,20 +40,109 @@ const delay = <T>(value: T, ms = 250): Promise<T> =>
   new Promise((resolve) => setTimeout(() => resolve(value), ms));
 
 // ---------------------------------------------------------------------------
-// Auth — structure this so a JWT can drop in later. For now it just validates
-// against the mock user and stashes a fake token string.
+// Authentication. The access token stays in memory; the refresh token is an
+// HttpOnly cookie managed by the server.
 // ---------------------------------------------------------------------------
+
+const API_BASE = 'http://localhost:8000';
+let accessToken: string | null = null;
+let refreshInFlight: Promise<string> | null = null;
 
 export interface AuthResult {
   message: string;
   user: User;
 }
 
+interface ApiResponse<T> {
+  data: T;
+  message: string;
+}
+
+interface AuthPayload {
+  accessToken: string;
+  user: User;
+}
+
+async function readApiError(response: Response, fallback: string) {
+  try {
+    const body = await response.json();
+    return new Error(body.message || body.error || fallback);
+  } catch {
+    return new Error(fallback);
+  }
+}
+
+function saveAccessToken(token: string | null) {
+  accessToken = token;
+}
+
+export function clearAccessToken() {
+  saveAccessToken(null);
+}
+
+export async function restoreAccessToken(): Promise<string> {
+  if (refreshInFlight) return refreshInFlight;
+  clearAccessToken();
+
+  refreshInFlight = (async () => {
+    const response = await fetch(`${API_BASE}/users/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      clearAccessToken();
+      window.dispatchEvent(new Event('auth:expired'));
+      throw await readApiError(response, 'Could not restore your session.');
+    }
+
+    const result = (await response.json()) as ApiResponse<{
+      accessToken: string;
+    }>;
+    saveAccessToken(result.data.accessToken);
+    return result.data.accessToken;
+  })();
+
+  try {
+    return await refreshInFlight;
+  } finally {
+    refreshInFlight = null;
+  }
+}
+
+/** Send a protected request and refresh/retry once when its access token expires. */
+export async function authenticatedFetch(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+): Promise<Response> {
+  if (!accessToken) await restoreAccessToken();
+
+  const send = () => {
+    const headers = new Headers(init.headers);
+    if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
+    return fetch(input, {
+      ...init,
+      headers,
+      credentials: 'include',
+    });
+  };
+
+  const tokenUsed = accessToken;
+  let response = await send();
+  if (response.status !== 401) return response;
+
+  // Another request may already have rotated the refresh token and updated
+  // the access token while this request was in flight.
+  if (accessToken === tokenUsed) await restoreAccessToken();
+  response = await send();
+  return response;
+}
+
 export async function login(
   email: string,
   password: string,
 ): Promise<AuthResult> {
-  const res = await fetch('http://localhost:8000/users/login', {
+  const res = await fetch(`${API_BASE}/users/login`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -65,13 +154,11 @@ export async function login(
     }),
   });
 
-  if (!res.ok) {
-    const error = await res.json();
+  if (!res.ok) throw await readApiError(res, 'Login failed');
 
-    throw new Error(error.message || 'Login failed');
-  }
-
-  return res.json();
+  const response = (await res.json()) as ApiResponse<AuthPayload>;
+  saveAccessToken(response.data.accessToken);
+  return { message: response.message, user: response.data.user };
 }
 
 export async function signup(
@@ -79,7 +166,7 @@ export async function signup(
   email: string,
   password: string,
 ): Promise<AuthResult> {
-  const res = await fetch('http://localhost:8000/users', {
+  const res = await fetch(`${API_BASE}/users`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -92,37 +179,31 @@ export async function signup(
     }),
   });
 
-  if (!res.ok) {
-    const error = await res.json();
+  if (!res.ok) throw await readApiError(res, 'Signup failed');
 
-    throw new Error(error.message || 'Signup failed');
-  }
-
-  return res.json();
+  const response = (await res.json()) as ApiResponse<AuthPayload>;
+  saveAccessToken(response.data.accessToken);
+  return { message: response.message, user: response.data.user };
 }
 
 export async function getCurrentUser(): Promise<User> {
-  const res = await fetch('http://localhost:8000/users/me', {
-    method: 'GET',
-    credentials: 'include',
-  });
+  const res = await authenticatedFetch(`${API_BASE}/users/me`);
 
-  if (!res.ok) {
-    throw new Error('Not authenticated');
-  }
+  if (!res.ok) throw await readApiError(res, 'Not authenticated');
 
-  const data = await res.json();
-  return data;
+  const response = (await res.json()) as ApiResponse<User>;
+  return response.data;
 }
 
 export async function logout(): Promise<void> {
-  const res = await fetch('http://localhost:8000/users/logout', {
-    method: 'POST',
-    credentials: 'include',
-  });
-
-  if (!res.ok) {
-    throw new Error('Logout failed');
+  try {
+    const res = await fetch(`${API_BASE}/users/logout`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+    if (!res.ok) throw await readApiError(res, 'Logout failed');
+  } finally {
+    clearAccessToken();
   }
 }
 

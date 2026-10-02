@@ -23,7 +23,7 @@ export default function SignupPage() {
     if (!email.trim()) next.email = 'Email is required';
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) next.email = 'Enter a valid email';
     if (!password) next.password = 'Password is required';
-    else if (password.length < 3) next.password = 'At least 3 characters';
+    else if (password.length < 8) next.password = 'At least 8 characters';
     setErrors(next);
     return Object.keys(next).length === 0;
   };
