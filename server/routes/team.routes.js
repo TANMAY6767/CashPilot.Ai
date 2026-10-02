@@ -11,7 +11,7 @@ import {
   acceptInvitation,
   updateTeamMemberRole,
   removeTeamMember,
-} from "../controllers/teams.controller.js";
+} from "../controllers/team.controller.js";
 
 import { checkAuth } from "../middleware/index.js";
 

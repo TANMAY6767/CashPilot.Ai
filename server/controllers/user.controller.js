@@ -1,249 +1,591 @@
 import prisma from "../prisma/client.js";
-import bcrypt from "bcrypt"
+import bcrypt from "bcrypt";
 import { getToken } from "../services/tokens.js";
-const createUser = async (req, res) => {
-    try {
-        const { name, email, password } = req.body;
 
-        if (!name || !email || !password) {
-            return res.status(400).json({
-                message: "Please fill all the required details."
-            });
-        }
+import { ApiError } from "../utils/ApiError.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { sendResponse, statusType } from "../utils/index.js";
 
-        const userExist = await prisma.user.findUnique({
-            where: {
-                email: email
-            }
-        });
 
-        if (userExist) {
-            return res.status(409).json({
-                error: "User already exists",
-            });
-        }
-        const hashedPassword = await bcrypt.hash(password, 10);
+const getUserId = (req) => req.user?._id;
 
-        const user = await prisma.user.create({
-            data: {
-                name: name,
-                email: email,
-                passwordHash: hashedPassword
-            }
-        });
+const createUser = asyncHandler(async (req, res) => {
+  const { name, email, password } = req.body;
 
-        const token = getToken(user);
+  const cleanName = name?.trim();
+  const cleanEmail = email?.trim().toLowerCase();
 
-        res.cookie("token", token, {
-            httpOnly: true,
-            sameSite: "strict",
-        });
+  if (!cleanName || !cleanEmail || !password) {
+    throw new ApiError(
+      statusType.BAD_REQUEST,
+      "Name, email and password are required."
+    );
+  }
 
-        return res.status(201).json({
-            message: "User created successfully",
-            user,
-        });
+  if (password.length < 3) {
+    throw new ApiError(
+      statusType.BAD_REQUEST,
+      "Password must be at least 8 characters long."
+    );
+  }
 
-    } catch (err) {
-        res.status(500).json("something went wrong");
-    }
+  const existingUser = await prisma.user.findUnique({
+    where: {
+      email: cleanEmail,
+    },
+  });
 
-};
+  if (existingUser) {
+    throw new ApiError(
+      statusType.CONFLICT,
+      "User already exists."
+    );
+  }
 
-const getAllUsers = async (req, res) => {
-    try {
-        const users = await prisma.user.findMany();
-        return res.status(200).json({
-            message: "Users found successfully",
-            users
-        });
-    } catch (error) {
-        res.status(500).json("something went wrong");
-    }
-}
+  const passwordHash = await bcrypt.hash(password, 10);
 
-const loginUser = async (req, res) => {
-    try {
-        const { email, password } = req.body;
-        console.log("tannmay", email, password);
-        if (!email || !password) {
-            return res.status(400).json({
-                message: "Please fill all the required details."
-            });
-        }
-        const user = await prisma.user.findUnique({
-            where: { email }
-        });
-        console.log("btrtbrthrt", user);
-        if (!user) {
-            return res.status(404).json({
-                message: "User not found"
-            });
-        }
-        const isMatch = await bcrypt.compare(password, user.passwordHash);
+  const user = await prisma.user.create({
+    data: {
+      name: cleanName,
+      email: cleanEmail,
+      passwordHash,
+    },
 
-        if (!isMatch) {
-            return res.status(401).json({
-                message: "Invalid credentials"
-            });
-        }
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
 
-        const token = getToken(user);
+  const token = getToken(user);
 
-        res.cookie("token", token, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "lax",
-            maxAge: 7 * 24 * 60 * 60 * 1000,
-        });
+  res.cookie("token", token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
 
-        return res.status(200).json({
-            message: "User loggedIn successfully",
-            user: {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                createdAt: user.createdAt,
-                updatedAt: user.updatedAt,
-            },
-        });
+  return sendResponse(
+    res,
+    "success",
+    user,
+    "User created successfully.",
+    statusType.CREATED
+  );
+});
 
-    } catch (error) {
-        res.status(500).json("something went wrong");
-    }
-}
-const updateMe = async (req, res) => {
-    try {
-        const { name, email } = req.body;
+const loginUser = asyncHandler(async (req, res) => {
+  const { email, password } = req.body;
 
-        if (email) {
-            const existingUser = await prisma.user.findUnique({
-                where: { email }
-            });
+  const cleanEmail = email?.trim().toLowerCase();
 
-            if (existingUser && existingUser.id !== req.user.id) {
-                return res.status(409).json({
-                    success: false,
-                    message: "Email already in use by another account"
-                });
-            }
-        }
+  if (!cleanEmail || !password) {
+    throw new ApiError(
+      statusType.BAD_REQUEST,
+      "Email and password are required."
+    );
+  }
 
-        const updatedUser = await prisma.user.update({
-            where: { id: req.user._id },  // Use id not _id
-            data: { name, email }
-        });
+  const user = await prisma.user.findUnique({
+    where: {
+      email: cleanEmail,
+    },
+  });
 
-        return res.status(200).json({
-            success: true,
-            message: "User updated successfully",
-            user: updatedUser
-        });
+  if (!user) {
+    throw new ApiError(
+      statusType.UNAUTHORIZED,
+      "Invalid email or password."
+    );
+  }
 
-    } catch (err) {
-        if (err.code === 'P2002') {
-            return res.status(409).json({
-                success: false,
-                message: "Email already exists"
-            });
-        }
-        if (err.code === 'P2025') {
-            return res.status(404).json({
-                success: false,
-                message: "User not found"
-            });
-        }
-        console.error("Update error:", err);
-        return res.status(500).json({
-            success: false,
-            message: "Something went wrong"
-        });
-    }
-};
-const deleteMe = async (req, res) => {
-    try {
-        const userId = req.user.id || req.user._id;
+  const isPasswordValid = await bcrypt.compare(
+    password,
+    user.passwordHash
+  );
 
-        if (!userId) {
-            return res.status(401).json({
-                success: false,
-                message: "User ID not found in token"
-            });
-        }
+  if (!isPasswordValid) {
+    throw new ApiError(
+      statusType.UNAUTHORIZED,
+      "Invalid email or password."
+    );
+  }
 
-        // Step 1: Check if user owns any teams
-        const ownedTeams = await prisma.team.findMany({
-            where: { createdById: userId },
-            include: { members: true }
-        });
+  const token = getToken(user);
 
-        // Step 2: Handle owned teams (transfer or delete)
-        for (const team of ownedTeams) {
-            const otherMembers = team.members.filter(m => m.userId !== userId);
+  res.cookie("token", token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
 
-            if (otherMembers.length > 0) {
-                // Transfer ownership to first other member
-                await prisma.team.update({
-                    where: { id: team.id },
-                    data: { createdById: otherMembers[0].userId }
-                });
-            } else {
-                // No other members — delete the team (cascade will handle rest)
-                await prisma.team.delete({ where: { id: team.id } });
-            }
-        }
+  const safeUser = {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
 
-        // Step 3: Now safe to delete user
-        await prisma.user.delete({
-            where: { id: userId }
-        });
+  return sendResponse(
+    res,
+    "success",
+    safeUser,
+    "User logged in successfully.",
+    statusType.OK
+  );
+});
 
-        res.clearCookie("token");
-
-        return res.status(200).json({
-            success: true,
-            message: "Account deleted successfully"
-        });
-
-    } catch (err) {
-        console.error("Delete error:", err);
-        return res.status(500).json({
-            success: false,
-            message: "Something went wrong"
-        });
-    }
-};
-const getMe = async (req, res) => {
-    try {
-        console.log("token is :",req.user._id);
-        const user = await prisma.user.findUnique({
-            where: { id: req.user._id }
-        });
-
-        if (!user) {
-            return res.status(404).json({
-                message: "User not found"
-            });
-        }
-
-        return res.status(200).json(user);
-    } catch (err) {
-        return res.status(500).json({
-            message: "Something went wrong"
-        });
-    }
-};
-
-const logoutUser = (req, res) => {
+const logoutUser = asyncHandler(async (req, res) => {
   res.clearCookie("token", {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
   });
 
-  return res.status(200).json({
-    message: "Logged out successfully",
-  });
-};
+  return sendResponse(
+    res,
+    "success",
+    null,
+    "Logged out successfully.",
+    statusType.OK
+  );
+});
 
-export { createUser, getAllUsers, getMe, deleteMe, updateMe, loginUser ,logoutUser};
+const getMe = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+
+  if (!userId) {
+    throw new ApiError(
+      statusType.UNAUTHORIZED,
+      "Unauthorized."
+    );
+  }
+
+  const user = await prisma.user.findUnique({
+    where: {
+      id: userId,
+    },
+
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  if (!user) {
+    throw new ApiError(
+      statusType.NOT_FOUND,
+      "User not found."
+    );
+  }
+
+  return sendResponse(
+    res,
+    "success",
+    user,
+    "User fetched successfully.",
+    statusType.OK
+  );
+});
+
+const updateMe = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+
+  if (!userId) {
+    throw new ApiError(
+      statusType.UNAUTHORIZED,
+      "Unauthorized."
+    );
+  }
+
+  const { name, email } = req.body;
+
+  const cleanName = name?.trim();
+  const cleanEmail = email?.trim().toLowerCase();
+
+  if (!cleanName && !cleanEmail) {
+    throw new ApiError(
+      statusType.BAD_REQUEST,
+      "Provide at least one field to update."
+    );
+  }
+
+  if (cleanEmail) {
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        email: cleanEmail,
+        NOT: {
+          id: userId,
+        },
+      },
+    });
+
+    if (existingUser) {
+      throw new ApiError(
+        statusType.CONFLICT,
+        "Email is already in use."
+      );
+    }
+  }
+
+  const updatedUser = await prisma.user.update({
+    where: {
+      id: userId,
+    },
+
+    data: {
+      ...(cleanName && {
+        name: cleanName,
+      }),
+
+      ...(cleanEmail && {
+        email: cleanEmail,
+      }),
+    },
+
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  return sendResponse(
+    res,
+    "success",
+    updatedUser,
+    "User updated successfully.",
+    statusType.OK
+  );
+});
+
+const changePassword = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+
+  if (!userId) {
+    throw new ApiError(
+      statusType.UNAUTHORIZED,
+      "Unauthorized."
+    );
+  }
+
+  const {
+    currentPassword,
+    newPassword,
+  } = req.body;
+
+  if (!currentPassword || !newPassword) {
+    throw new ApiError(
+      statusType.BAD_REQUEST,
+      "Current password and new password are required."
+    );
+  }
+
+  if (newPassword.length < 3) {
+    throw new ApiError(
+      statusType.BAD_REQUEST,
+      "New password must be at least 8 characters long."
+    );
+  }
+
+  const user = await prisma.user.findUnique({
+    where: {
+      id: userId,
+    },
+  });
+
+  if (!user) {
+    throw new ApiError(
+      statusType.NOT_FOUND,
+      "User not found."
+    );
+  }
+
+  const isPasswordValid = await bcrypt.compare(
+    currentPassword,
+    user.passwordHash
+  );
+
+  if (!isPasswordValid) {
+    throw new ApiError(
+      statusType.UNAUTHORIZED,
+      "Current password is incorrect."
+    );
+  }
+
+  const isSamePassword = await bcrypt.compare(
+    newPassword,
+    user.passwordHash
+  );
+
+  if (isSamePassword) {
+    throw new ApiError(
+      statusType.BAD_REQUEST,
+      "New password must be different from the current password."
+    );
+  }
+
+  const newPasswordHash = await bcrypt.hash(
+    newPassword,
+    10
+  );
+
+  await prisma.user.update({
+    where: {
+      id: userId,
+    },
+
+    data: {
+      passwordHash: newPasswordHash,
+    },
+  });
+
+  return sendResponse(
+    res,
+    "success",
+    null,
+    "Password changed successfully.",
+    statusType.OK
+  );
+});
+
+const getAllUsers = asyncHandler(async (req, res) => {
+  const users = await prisma.user.findMany({
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+
+  return sendResponse(
+    res,
+    "success",
+    users,
+    "Users fetched successfully.",
+    statusType.OK
+  );
+});
+
+const getMyOrganizations = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+
+  if (!userId) {
+    throw new ApiError(
+      statusType.UNAUTHORIZED,
+      "Unauthorized."
+    );
+  }
+
+  const memberships = await prisma.organizationMember.findMany({
+    where: {
+      userId,
+    },
+
+    select: {
+      id: true,
+      role: true,
+      joinedAt: true,
+
+      organization: {
+        select: {
+          id: true,
+          name: true,
+          createdById: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+    },
+
+    orderBy: {
+      joinedAt: "desc",
+    },
+  });
+
+  return sendResponse(
+    res,
+    "success",
+    memberships,
+    "Organizations fetched successfully.",
+    statusType.OK
+  );
+});
+
+const getMyTeams = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+
+  if (!userId) {
+    throw new ApiError(
+      statusType.UNAUTHORIZED,
+      "Unauthorized."
+    );
+  }
+
+  const memberships = await prisma.teamMember.findMany({
+    where: {
+      userId,
+    },
+
+    select: {
+      id: true,
+      role: true,
+      joinedAt: true,
+
+      team: {
+        select: {
+          id: true,
+          name: true,
+          organizationId: true,
+          createdById: true,
+          createdAt: true,
+          updatedAt: true,
+
+          organization: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
+    },
+
+    orderBy: {
+      joinedAt: "desc",
+    },
+  });
+
+  return sendResponse(
+    res,
+    "success",
+    memberships,
+    "Teams fetched successfully.",
+    statusType.OK
+  );
+});
+
+const deleteMe = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+
+  if (!userId) {
+    throw new ApiError(
+      statusType.UNAUTHORIZED,
+      "Unauthorized."
+    );
+  }
+
+  const user = await prisma.user.findUnique({
+    where: {
+      id: userId,
+    },
+
+    select: {
+      id: true,
+    },
+  });
+
+  if (!user) {
+    throw new ApiError(
+      statusType.NOT_FOUND,
+      "User not found."
+    );
+  }
+
+  /*
+   * IMPORTANT:
+   *
+   * A user can be the creator/owner of organizations and teams.
+   * Because those foreign keys are required, blindly deleting
+   * the user can fail.
+   *
+   * Therefore, check ownership before deleting.
+   */
+
+  const ownedOrganizations = await prisma.organization.findMany({
+    where: {
+      createdById: userId,
+    },
+
+    select: {
+      id: true,
+      name: true,
+    },
+  });
+
+  if (ownedOrganizations.length > 0) {
+    throw new ApiError(
+      statusType.CONFLICT,
+      "You cannot delete your account while you own organizations. Transfer ownership or delete the organizations first."
+    );
+  }
+
+  const ownedTeams = await prisma.team.findMany({
+    where: {
+      createdById: userId,
+    },
+
+    select: {
+      id: true,
+      name: true,
+    },
+  });
+
+  if (ownedTeams.length > 0) {
+    throw new ApiError(
+      statusType.CONFLICT,
+      "You cannot delete your account while you own teams. Transfer ownership or delete the teams first."
+    );
+  }
+
+  await prisma.user.delete({
+    where: {
+      id: userId,
+    },
+  });
+
+  res.clearCookie("token", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+  });
+
+  return sendResponse(
+    res,
+    "success",
+    null,
+    "Account deleted successfully.",
+    statusType.OK
+  );
+});
+
+
+export {
+  createUser,
+  loginUser,
+  logoutUser,
+  getMe,
+  updateMe,
+  changePassword,
+  getAllUsers,
+  getMyOrganizations,
+  getMyTeams,
+  deleteMe,
+};
