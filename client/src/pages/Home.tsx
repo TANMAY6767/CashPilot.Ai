@@ -6,16 +6,9 @@ const fmt = (n: number) =>
 
 export default function HomePage() {
   
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [activePage, setActivePage] = useState("dashboard");
 
-useEffect(() => {
-  const timer = setTimeout(() => {
-    setLoading(false);
-  }, 3000);
-
-  return () => clearTimeout(timer);
-}, []);
 
   if (loading ) {
     return (
@@ -24,10 +17,16 @@ useEffect(() => {
   }
 
   return (
-    <div className="bg-red-100 min-h-screen flex">
-      
+    <>
+      <div>
+            <h2 className="text-3xl font-bold">
+              Home
+            </h2>
 
-      <h1>you are home</h1>
-    </div>
+            <p className="mt-2 text-gray-600">
+              you are Home.
+            </p>
+          </div>
+    </>
   );
 }

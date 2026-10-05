@@ -3,7 +3,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendResponse, statusType } from "../utils/index.js";
 
-const getUserId = (req) => req.user?._id;
+const getUserId = (req) => req.user?.sub;
 
 
 /* =========================================================

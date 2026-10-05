@@ -6,14 +6,16 @@ import LoginPage from '@/pages/LoginPage';
 import SignupPage from '@/pages/SignupPage';
 import TeamsPage from '@/pages/TeamsPage';
 import Home from '@/pages/Home';
-import TeamPage from '@/pages/TeamsPage';
-import OrganizationPage from '@/pages/OrganizationPage';
+import OrganizationPage from '@/pages/Organization/OrganizationPage';
+import OrganizationOverview from '@/pages/Organization/OrganizationOverview';
 import DashboardPage from '@/pages/DashboardPage';
 import TransactionPage from '@/pages/TransactionPage';
+import ProfilePage from './pages/profile/ProfilePage';
+import SettingsPage from './pages/settings/SettingsPage';
 
 export default function App() {
   return (
-     <AuthProvider>
+    <AuthProvider>
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
@@ -28,9 +30,12 @@ export default function App() {
           >
             <Route index element={<Home />} />
             <Route path="dashboard" element={<DashboardPage />} />
+            <Route path="profile" element={<ProfilePage />} />
+            <Route path="settings" element={<SettingsPage />} />
             <Route path="teams" element={<TeamsPage />} />
             <Route path="expenses" element={<TransactionPage />} />
             <Route path="organization" element={<OrganizationPage />} />
+            <Route path="organization/:orgId" element={<OrganizationOverview />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

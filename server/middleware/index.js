@@ -6,6 +6,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { statusType } from "../utils/index.js";
 
 export const checkAuth = (req, res, next) => {
+   
   const authHeader = req.headers.authorization;
 
   if (

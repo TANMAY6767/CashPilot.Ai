@@ -2,27 +2,83 @@
 @tailwind components;
 @tailwind utilities;
 
+/* =========================================================
+   THEME TOKENS — single source of truth
+========================================================= */
+
 :root {
   color-scheme: light;
-  background: #f9fafb;
+
+  /* Surfaces */
+  --bg-app: 250 250 250;
+  --bg-surface: 255 255 255;
+  --bg-subtle: 245 245 245;
+  --bg-muted: 229 229 229;
+
+  /* Text */
+  --text-primary: 23 23 23;
+  --text-secondary: 82 82 82;
+  --text-muted: 115 115 115;
+  --text-faint: 163 163 163;
+
+  /* Borders */
+  --border-default: 229 229 229;
+  --border-strong: 212 212 212;
+
+  /* Accent */
+  --accent: 99 102 241;
+  --accent-hover: 79 70 229;
+
+  /* Feedback */
+  --success: 22 163 74;
+  --danger: 220 38 38;
 }
 
-:root.dark {
+.dark {
   color-scheme: dark;
-  background: #111827;
+
+  --bg-app: 10 10 10;
+  --bg-surface: 23 23 23;
+  --bg-subtle: 31 31 31;
+  --bg-muted: 38 38 38;
+
+  --text-primary: 250 250 250;
+  --text-secondary: 229 229 229;
+  --text-muted: 163 163 163;
+  --text-faint: 115 115 115;
+
+  --border-default: 38 38 38;
+  --border-strong: 64 64 64;
+
+  --accent: 99 102 241;
+  --accent-hover: 129 140 248;
+
+  --success: 34 197 94;
+  --danger: 248 113 113;
 }
+
+/* =========================================================
+   BASE
+========================================================= */
 
 body {
   min-width: 320px;
   min-height: 100vh;
+  background-color: rgb(var(--bg-app));
+  color: rgb(var(--text-primary));
 }
 
 .app-shell,
 .app-sidebar,
 .app-sidebar > div,
 main {
-  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
+  transition: background-color 180ms ease, border-color 180ms ease,
+    color 180ms ease;
 }
+
+/* =========================================================
+   THEME SWITCH
+========================================================= */
 
 .theme-switch {
   display: inline-flex;
@@ -30,13 +86,13 @@ main {
   height: 1.125rem;
   align-items: center;
   border-radius: 9999px;
-  background: #d1d5db;
+  background: rgb(var(--bg-muted));
   padding: 2px;
   transition: background-color 180ms ease;
 }
 
 .theme-switch-on {
-  background: #4f46e5;
+  background: rgb(var(--accent));
 }
 
 .theme-switch-thumb {
@@ -52,43 +108,27 @@ main {
   transform: translateX(0.875rem);
 }
 
-.dark body {
-  background-color: #111827;
-  color: #f3f4f6;
+/* =========================================================
+   FORMS
+========================================================= */
+
+input,
+select,
+textarea {
+  border-color: rgb(var(--border-strong));
+  background-color: rgb(var(--bg-app));
+  color: rgb(var(--text-primary));
 }
 
-.dark .bg-white { background-color: #1f2937; }
-.dark .bg-gray-50 { background-color: #111827; }
-.dark .bg-gray-100 { background-color: #374151; }
-.dark .bg-gray-900 { background-color: #4f46e5; }
-.dark .text-black { color: #f9fafb; }
-.dark .text-gray-900,
-.dark .text-gray-800,
-.dark .text-gray-700 { color: #f3f4f6; }
-.dark .text-gray-600,
-.dark .text-gray-500 { color: #cbd5e1; }
-.dark .text-gray-400 { color: #9ca3af; }
-.dark .border-gray-200,
-.dark .border-gray-300,
-.dark .border { border-color: #374151; }
-.dark .hover\:bg-gray-100:hover { background-color: #374151; }
-.dark .hover\:bg-gray-50:hover { background-color: #374151; }
-.dark .hover\:text-gray-900:hover,
-.dark .hover\:text-black:hover { color: #fff; }
-.dark .bg-blue-400 { background-color: #1e3a5f; }
-.dark .bg-gray-50.text-left { background-color: #374151; }
-
-.dark input,
-.dark select,
-.dark textarea {
-  border-color: #4b5563;
-  background-color: #111827;
-  color: #f3f4f6;
+input::placeholder,
+textarea::placeholder {
+  color: rgb(var(--text-faint));
 }
-
-.dark input::placeholder,
-.dark textarea::placeholder { color: #9ca3af; }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { transition-duration: 0.01ms !important; }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+  }
 }

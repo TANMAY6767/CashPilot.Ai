@@ -1,11 +1,18 @@
 import { useEffect, useState } from 'react';
-import * as api from '@/services/org';
-import { AuthResult } from '@/services/org';
+import {
+  getAllOrgs,
+  createOrg,
+  type Organization,
+} from "@/services/oraganizations/org.services";
+
+import { useNavigate } from "react-router-dom";
+
+
 
 export default function OrganizationPage() {
-  const [orgs, setOrgs] = useState<AuthResult | null>(null);
+  const [orgs, setOrgs] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
-
+  const navigate = useNavigate();
   // Form states
   const [showForm, setShowForm] = useState(false);
   const [orgName, setOrgName] = useState('');
@@ -13,18 +20,19 @@ export default function OrganizationPage() {
   const [error, setError] = useState('');
 
   // Get all organizations
-  const loadOrganizations = async () => {
-    try {
-      setLoading(true);
+const loadOrganizations = async () => {
+  try {
+    setLoading(true);
 
-      const data = await api.getAllOrgs();
-      setOrgs(data);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const response = await getAllOrgs();
+    console.log("tanu:- ",response);
+    setOrgs(response ?? []);
+  } catch (error) {
+    console.error(error);
+  } finally {
+    setLoading(false);
+  }
+};
 
   useEffect(() => {
     loadOrganizations();
@@ -45,7 +53,7 @@ export default function OrganizationPage() {
       setCreating(true);
       setError('');
 
-      await api.createOrg(orgName.trim());
+      await createOrg(orgName.trim());
 
       // Clear form
       setOrgName('');
@@ -71,12 +79,10 @@ export default function OrganizationPage() {
     <div className="flex flex-col bg-white w-full h-screen">
 
       {/* Header */}
-      <div className="flex w-full items-center space-x-10 p-6">
-
+      <div className="flex w-full items-center space-x-10 p-6 border-b-2 border-black">
         <h2 className="text-3xl font-bold">
           Organization
         </h2>
-
         <button
           onClick={() => {
             setShowForm(true);
@@ -86,12 +92,10 @@ export default function OrganizationPage() {
         >
           + New Organization
         </button>
-
       </div>
 
-
       {/* Content */}
-      <div className="w-full bg-blue-400 flex-1 p-6">
+      <div className="w-full  flex-1 p-6">
 
         {/* Loading */}
         {loading && (
@@ -103,25 +107,24 @@ export default function OrganizationPage() {
 
         {/* Organizations */}
         {!loading && (
-          <div className="grid grid-cols-4">
+  <div className="grid grid-cols-4">
+    {orgs.map((org) => (
+      <div
+        key={org.id}
+        onClick={() => navigate(`/organization/${org.id}`)}
+        className="p-6 m-3 bg-white border rounded-xl shadow-sm"
+      >
+        <h2 className="text-xl font-bold">
+          {org.name}
+        </h2>
 
-            {orgs?.organizations.map((org) => (
-              <div
-                key={org.id}
-                className="p-6 m-3 bg-white border rounded-xl shadow-sm"
-              >
-                <h2 className="text-xl font-bold">
-                  {org.name}
-                </h2>
-
-                <p className="text-gray-500">
-                  {org._count?.members ?? 0} members
-                </p>
-              </div>
-            ))}
-
-          </div>
-        )}
+        <p className="text-gray-500">
+          {org.memberCount} members
+        </p>
+      </div>
+    ))}
+  </div>
+)}
 
       </div>
 
