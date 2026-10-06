@@ -2,13 +2,12 @@ import prisma from "../prisma/client.js";
 import { ApiError } from "../utils/ApiError.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendResponse, statusType } from "../utils/index.js";
+import { sendEmail } from "../services/email.service.js";
+import crypto from "crypto";
 
 const getUserId = (req) => req.user?.sub;
 
 
-/* =========================================================
-   1. CREATE ORGANIZATION
-   ========================================================= */
 
 const createOrg = asyncHandler(async (req, res) => {
   const userId = getUserId(req);
@@ -91,12 +90,6 @@ const createOrg = asyncHandler(async (req, res) => {
   )
 });
 
-
-
-/* =========================================================
-   2. GET ALL ORGANIZATIONS OF LOGGED-IN USER
-   ========================================================= */
-
 const getAllOrgs = asyncHandler(async (req, res) => {
   const userId = getUserId(req);
 
@@ -148,10 +141,6 @@ const getAllOrgs = asyncHandler(async (req, res) => {
 
 });
 
-
-/* =========================================================
-   3. GET ONE ORGANIZATION
-   ========================================================= */
 const getOrganization = asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   const { orgId } = req.params;
@@ -233,13 +222,6 @@ const getOrganization = asyncHandler(async (req, res) => {
 
 });
 
-
-
-
-
-/* =========================================================
-   4. UPDATE ORGANIZATION
-   ========================================================= */
 const updateOrganization = asyncHandler(async(req,res) => {
   const userId = getUserId(req);
   const { orgId } = req.params;
@@ -300,13 +282,6 @@ const updateOrganization = asyncHandler(async(req,res) => {
 
 });
 
-
-
-
-
-/* =========================================================
-   5. DELETE ORGANIZATION
-   ========================================================= */
 const deleteOrganization = asyncHandler(async(req,res) => {
   const userId = getUserId(req);
   const { orgId } = req.params;
@@ -350,12 +325,6 @@ const deleteOrganization = asyncHandler(async(req,res) => {
     );
 
 });
-
-
-
-/* =========================================================
-   6. GET ORGANIZATION MEMBERS
-   ========================================================= */
 
 const getOrganizationMembers = asyncHandler(async(req,res) => {
   const userId = getUserId(req);
@@ -413,13 +382,6 @@ const getOrganizationMembers = asyncHandler(async(req,res) => {
       statusType.OK
     );
 })
-
-
-
-
-/* =========================================================
-   7. ADD MEMBER TO ORGANIZATION
-   ========================================================= */
 
 const addOrganizationMember = asyncHandler(async(req,res) => {
   const userId = getUserId(req);
@@ -518,12 +480,263 @@ const addOrganizationMember = asyncHandler(async(req,res) => {
 
 })
 
+const sendOrgInvitationEmail = asyncHandler(async(req,res) => {
+  const userId = getUserId(req);
+  const { orgId } = req.params;
 
+  const email = req.body.email?.trim().toLowerCase();
+  const role = req.body.role || "member";
 
+  if (!userId) {
+    throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized");
+  }
+  if (!orgId) {
+    throw new ApiError(statusType.BAD_REQUEST, "Organization ID is required.");
+  }
+  if (!email) {
+    throw new ApiError(statusType.BAD_REQUEST, "User email is required.");
+  }
 
-/* =========================================================
-   8. UPDATE MEMBER ROLE
-   ========================================================= */
+  if(!["owner","admin","member"].includes(role)){
+    throw new ApiError(statusType.BAD_REQUEST,"Invalid member role.") 
+  }
+
+  const requester = await prisma.organizationMember.findUnique({
+      where: {
+        organizationId_userId: {
+          organizationId: orgId,
+          userId,
+        },
+      },
+      select:{
+        role:true
+      }
+    });
+
+  if(!requester){
+    throw new ApiError(statusType.FORBIDDEN,"You are not a member of this organization.") 
+  }
+  if (requester.role !== "owner") {
+    throw new ApiError(statusType.FORBIDDEN,"Only the organization owner can add it.") 
+  }
+
+  const user = await prisma.user.findUnique({
+    where:{
+      email:email.toLowerCase().trim(),
+    },
+    select:{
+      id:true,
+      name:true,
+      email:true,
+    },
+  });
+
+  if (!user) {
+    throw new ApiError(statusType.NOT_FOUND, "User not found.");
+  }
+
+  const existingMember = await prisma.organizationMember.findUnique({
+    where:{
+      organizationId_userId:{
+        organizationId:orgId,
+        userId:user.id
+      },
+    },
+  });
+  if (existingMember) {
+    throw new ApiError(statusType.CONFLICT, "User is already a member of this organization.");
+  }
+
+  const existingInvitation = await prisma.organizationInvitation.findFirst({
+      where: {
+        organizationId:orgId,
+        email,
+        status: "pending",
+      },
+    });
+
+    if (existingInvitation) {
+      throw new ApiError(statusType.CONFLICT, "Invitation already sent.");
+    }
+
+    const token = crypto.randomBytes(32).toString("hex");
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+
+    const invitation = await prisma.organizationInvitation.create({
+      data: {
+        organizationId:orgId,
+        email,
+        invitedById: userId,
+        role,
+        token,
+        expiresAt,
+      },
+
+      include: {
+        organization: true,
+        invitedBy: true,
+      },
+    });
+
+    await sendEmail({
+      email,
+      orgName: invitation.organization.name,
+      inviterName: invitation.invitedBy.name,
+      token,
+    });
+
+    return sendResponse(
+      res,
+      "success",
+      null,
+      "Invitation sent successfully",
+      statusType.OK
+    );
+})
+
+const acceptInvitation = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { token } = req.params;
+
+  if (!userId) {
+    throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized.");
+  }
+  if (!token) {
+    throw new ApiError(statusType.BAD_REQUEST, "Invitation token is required.");
+  }
+
+  const invitation = await prisma.organizationInvitation.findUnique({
+    where: { token },
+    select: {
+      id: true,
+      organizationId: true,
+      email: true,
+      role: true,
+      status: true,
+      expiresAt: true,
+    },
+  });
+
+  if (!invitation) {
+    throw new ApiError(statusType.NOT_FOUND, "Invitation not found.");
+  }
+
+  if (invitation.status !== "pending") {
+    throw new ApiError(statusType.CONFLICT, "Invitation is no longer valid.");
+  }
+
+  if (invitation.expiresAt <= new Date()) {
+    await prisma.organizationInvitation.update({
+      where: { id: invitation.id },
+      data: { status: "expired" },
+    });
+    throw new ApiError(statusType.GONE, "Invitation has expired.");
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, email: true },
+  });
+
+  if (!user) {
+    throw new ApiError(statusType.UNAUTHORIZED, "User no longer exists.");
+  }
+
+  // KEY CHECK: the logged-in user must be the invitee.
+  if (user.email.toLowerCase() !== invitation.email.toLowerCase()) {
+    throw new ApiError(
+      statusType.FORBIDDEN,
+      "This invitation was sent to a different email address."
+    );
+  }
+
+  // Idempotency: already a member?
+  const existing = await prisma.organizationMember.findUnique({
+    where: {
+      organizationId_userId: {
+        organizationId: invitation.organizationId,
+        userId: user.id,
+      },
+    },
+  });
+
+  if (existing) {
+    await prisma.organizationInvitation.update({
+      where: { id: invitation.id },
+      data: { status: "accepted" },
+    });
+
+    return sendResponse(
+      res, "success", null,
+      "You are already a member of this organization.",
+      statusType.OK
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const updated = await tx.organizationInvitation.updateMany({
+      where: { id: invitation.id, status: "pending" },
+      data: { status: "accepted" },
+    });
+
+    if (updated.count !== 1) {
+      throw new ApiError(statusType.CONFLICT, "Invitation already used.");
+    }
+
+    await tx.organizationMember.create({
+      data: {
+        organizationId: invitation.organizationId,
+        userId: user.id,
+        role: invitation.role,
+      },
+    });
+  });
+
+  return sendResponse(
+    res, "success", null,
+    "Invitation accepted successfully.",
+    statusType.OK
+  );
+});
+
+const getInvitationDetails = asyncHandler(async (req, res) => {
+  const { token } = req.params;
+  if (!token) {
+    throw new ApiError(statusType.BAD_REQUEST, "Invitation token is required.");
+  }
+
+  const invitation = await prisma.organizationInvitation.findUnique({
+    where: { token },
+    select: {
+      organizationId: true,
+      email: true,
+      role: true,
+      status: true,
+      expiresAt: true,
+      organization: { select: { name: true } },
+    },
+  });
+
+  if (!invitation) {
+    throw new ApiError(statusType.NOT_FOUND, "Invitation not found.");
+  }
+
+  return sendResponse(
+    res,
+    "success",
+    {
+      organizationId: invitation.organizationId,
+      organizationName: invitation.organization.name,
+      email: invitation.email,
+      role: invitation.role,
+      status: invitation.status,
+      expiresAt: invitation.expiresAt,
+    },
+    "Invitation fetched successfully.",
+    statusType.OK
+  );
+});
 
 const updateOrganizationMemberRole = asyncHandler(async(req,res) => {
   const userId = getUserId(req);
@@ -619,14 +832,6 @@ const updateOrganizationMemberRole = asyncHandler(async(req,res) => {
     );
 });
 
-
-
-
-
-/* =========================================================
-   9. REMOVE MEMBER
-   ========================================================= */
-
 const removeOrganizationMember =asyncHandler(async(req,res) => {
   const userId = getUserId(req);
   const { orgId, memberUserId } = req.params;
@@ -695,13 +900,6 @@ const removeOrganizationMember =asyncHandler(async(req,res) => {
     );
 })
 
-
-
-
-/* =========================================================
-   EXPORT
-   ========================================================= */
-
 export {
   createOrg,
   getAllOrgs,
@@ -712,4 +910,7 @@ export {
   addOrganizationMember,
   updateOrganizationMemberRole,
   removeOrganizationMember,
+  sendOrgInvitationEmail,
+  acceptInvitation,
+  getInvitationDetails
 };

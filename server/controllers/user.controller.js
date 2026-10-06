@@ -231,7 +231,7 @@ const createUser = asyncHandler(async (req, res) => {
         );
     }
 
-    if (password.length < 8) {
+    if (password.length < 3) {
         throw new ApiError(
             statusType.BAD_REQUEST,
             "Password must be at least 8 characters long."

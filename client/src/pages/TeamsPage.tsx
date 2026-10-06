@@ -1,36 +1,44 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Plus } from 'lucide-react';
-import * as api from '@/services/api';
-import type { Team } from '@/types';
-import PageHeader from '@/components/PageHeader';
-import TeamCard from '@/components/TeamCard';
+import { useState } from 'react';
+import { ArrowRight, ChevronDown, CircleEllipsis, Plus, Search, UsersRound, X } from 'lucide-react';
+
+type Team = { name: string; description: string; budget: number; spent: number; members: number; tone: string };
+const startingTeams: Team[] = [
+  { name: 'Engineering', description: 'Product development & infrastructure', budget: 26000, spent: 18400, members: 8, tone: 'violet' },
+  { name: 'Product & Design', description: 'Research, design & product strategy', budget: 18000, spent: 12850, members: 5, tone: 'blue' },
+  { name: 'Sales', description: 'Customer growth & partnerships', budget: 15000, spent: 9200, members: 6, tone: 'orange' },
+  { name: 'People & Culture', description: 'Hiring, team & workplace', budget: 8000, spent: 3470, members: 3, tone: 'green' },
+  { name: 'Operations', description: 'Finance, legal & business operations', budget: 3000, spent: 2760, members: 2, tone: 'rose' },
+  { name: 'Marketing', description: 'Brand, content & communications', budget: 10000, spent: 5400, members: 4, tone: 'amber' },
+];
+const currency = (amount: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(amount);
 
 export default function TeamsPage() {
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [teams, setTeams] = useState(startingTeams);
+  const [query, setQuery] = useState('');
   const [showForm, setShowForm] = useState(false);
+  const [modalMode, setModalMode] = useState<'create' | 'budget' | 'member'>('create');
+  const [selectedTeam, setSelectedTeam] = useState('');
+  const [memberName, setMemberName] = useState('');
+  const [name, setName] = useState('');
+  const [budget, setBudget] = useState('');
+  const [activeTab, setActiveTab] = useState<'teams' | 'members'>('teams');
+  const filtered = teams.filter((team) => team.name.toLowerCase().includes(query.toLowerCase()));
+  const createTeam = (event: React.FormEvent) => { event.preventDefault(); if (!name.trim()) return; setTeams([{ name: name.trim(), description: 'Add a short description for this team', budget: Number(budget) || 0, spent: 0, members: 0, tone: 'violet' }, ...teams]); setName(''); setBudget(''); setShowForm(false); };
+  const openModal = (mode: typeof modalMode, teamName = '') => { setModalMode(mode); setSelectedTeam(teamName); setShowForm(true); };
+  const saveTeamChange = (event: React.FormEvent) => { event.preventDefault(); if (modalMode === 'budget') setTeams((current) => current.map((team) => team.name === selectedTeam ? { ...team, budget: Number(budget) || team.budget } : team)); if (modalMode === 'member' && memberName) setTeams((current) => current.map((team) => team.name === selectedTeam ? { ...team, members: team.members + 1 } : team)); setBudget(''); setMemberName(''); setShowForm(false); };
 
-  
+  return <div className="page-wrap">
+    <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> ORGANIZATION</div><h1>Teams & budgets</h1><p>Organize your people and keep team spending on track.</p></div><button className="button button-primary" onClick={() => openModal('create')}><Plus size={17}/>Create team</button></div>
+    <div className="organization-bar panel"><div className="org-avatar">N</div><div className="org-name-block"><span className="subtle-label">CURRENT ORGANIZATION</span><strong>Northstar Studio</strong></div><button className="button button-secondary org-switch">Switch organization <ChevronDown size={15}/></button></div>
+    <div className="tabs-row"><button className={`tab-button ${activeTab === 'teams' ? 'tab-active' : ''}`} onClick={() => setActiveTab('teams')}>Teams <span>{teams.length}</span></button><button className={`tab-button ${activeTab === 'members' ? 'tab-active' : ''}`} onClick={() => setActiveTab('members')}>Members <span>24</span></button><div className="tabs-spacer"/><label className="search-field"><Search size={16}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={activeTab === 'teams' ? 'Search teams' : 'Search members'}/></label></div>
+    {activeTab === 'teams' ? <><div className="section-inline-heading"><div><h2>All teams <span className="inline-count">{teams.length}</span></h2><p>Team budgets reset at the start of each month.</p></div><button className="button button-quiet">All teams <ChevronDown size={15}/></button></div><div className="team-grid">{filtered.map((team) => <article className="panel team-card" key={team.name}><div className="team-card-top"><div className={`team-avatar tone-${team.tone}`}>{team.name.split(/\s|&/).filter(Boolean).map((x) => x[0]).slice(0, 2).join('').toUpperCase()}</div><button className="icon-button" aria-label={`Options for ${team.name}`}><CircleEllipsis size={20}/></button></div><h3>{team.name}</h3><p className="team-description">{team.description}</p><div className="team-members-line"><div className="avatar-stack"><span className="avatar avatar-small avatar-indigo">JD</span><span className="avatar avatar-small avatar-pink">AK</span><span className="avatar avatar-small avatar-green">ML</span>{team.members > 3 && <span className="avatar avatar-small avatar-gray">+{team.members - 3}</span>}</div><span>{team.members} members</span><button className="add-member" aria-label={`Add member to ${team.name}`} onClick={() => openModal('member', team.name)}><Plus size={15}/></button></div><div className="team-card-divider"/><div className="team-budget-head"><span>Monthly budget</span><button className="edit-budget-button" onClick={() => { setBudget(String(team.budget)); openModal('budget', team.name); }}>Edit budget</button><span><strong>{currency(team.spent)}</strong> <i>of {currency(team.budget)}</i></span></div><div className="progress-track progress-large"><span className={`progress-fill ${team.tone}`} style={{ width: `${team.budget ? Math.min(100, team.spent / team.budget * 100) : 0}%` }}/></div><div className="team-budget-bottom"><span>{team.budget ? Math.round(team.spent / team.budget * 100) : 0}% used</span><span>{currency(Math.max(0, team.budget - team.spent))} left</span></div><button className="team-open-link">View team details <ArrowRight size={15}/></button></article>)}</div></> : <MembersPanel query={query}/>}
+    <div className="bottom-note"><span className="status-dot"/> Changes are saved automatically</div>
+    {showForm && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowForm(false); }}><form className="modal-card" onSubmit={modalMode === 'create' ? createTeam : saveTeamChange}><div className="modal-heading"><div><span className="modal-icon"><UsersRound size={18}/></span><h2>{modalMode === 'create' ? 'Create a team' : modalMode === 'budget' ? 'Edit team budget' : `Add member to ${selectedTeam}`}</h2><p>{modalMode === 'create' ? 'Set up a team and give them a monthly budget.' : modalMode === 'budget' ? 'Update the monthly spending limit for this team.' : 'Choose an organization member and assign their team role.'}</p></div><button type="button" className="icon-button" onClick={() => setShowForm(false)} aria-label="Close"><X size={19}/></button></div>{modalMode === 'create' && <label className="form-label">Team name<input autoFocus required value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Customer success"/></label>}{modalMode !== 'member' ? <label className="form-label">Monthly budget<div className="input-with-prefix"><span>$</span><input autoFocus={modalMode === 'budget'} type="number" min="0" value={budget} onChange={(event) => setBudget(event.target.value)} placeholder="0.00"/></div></label> : <><label className="form-label">Organization member<select required value={memberName} onChange={(event) => setMemberName(event.target.value)}><option value="">Select a member</option><option>Alex Kim</option><option>Morgan Lee</option><option>Sam Chen</option></select></label><label className="form-label">Team role<select><option>Member</option><option>Team admin</option></select></label></>}<div className="form-note"><Plus size={16}/> {modalMode === 'member' ? 'They must already belong to this organization.' : 'You can adjust the budget and team members any time.'}</div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setShowForm(false)}>Cancel</button><button type="submit" className="button button-primary"><Plus size={16}/>{modalMode === 'create' ? 'Create team' : modalMode === 'budget' ? 'Save budget' : 'Add to team'}</button></div></form></div>}
+  </div>;
+}
 
-  const load = () => {
-    setLoading(true);
-    api.getTeams().then(setTeams).finally(() => setLoading(false));
-  };
-
-  useEffect(load, []);
-
-  return (
-    <>
-    <div>
-            <h2 className="text-3xl font-bold">
-              Teams
-            </h2>
-
-            <p className="mt-2 text-gray-600">
-              Manage your teams here.
-            </p>
-          </div>
-    </>
-  );
+function MembersPanel({ query }: { query: string }) {
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const people = [{ name: 'Jordan Davis', email: 'jordan@northstar.co', org: 'Owner', team: 'Engineering', initials: 'JD' }, { name: 'Alex Kim', email: 'alex@northstar.co', org: 'Admin', team: 'Sales', initials: 'AK' }, { name: 'Morgan Lee', email: 'morgan@northstar.co', org: 'Member', team: 'Product & Design', initials: 'ML' }, { name: 'Sam Chen', email: 'sam@northstar.co', org: 'Member', team: 'People & Culture', initials: 'SC' }].filter((person) => `${person.name} ${person.email}`.toLowerCase().includes(query.toLowerCase()));
+  return <><section className="panel member-panel"><div className="panel-heading"><div><h2>Organization members</h2><p>Manage access and organization roles.</p></div><button className="button button-primary" onClick={() => setInviteOpen(true)}><Plus size={16}/>Invite members</button></div><div className="table-scroll"><table className="data-table member-table"><thead><tr><th>MEMBER</th><th>ORG ROLE</th><th>TEAM</th><th>TEAM ROLE</th><th/></tr></thead><tbody>{people.map((person) => <tr key={person.email}><td><div className="person-cell"><span className="avatar avatar-small avatar-indigo">{person.initials}</span><div><strong>{person.name}</strong><span>{person.email}</span></div></div></td><td><select className="role-select" defaultValue={person.org}><option>Owner</option><option>Admin</option><option>Member</option></select></td><td>{person.team}</td><td><select className="role-select" defaultValue="Member"><option>Team admin</option><option>Member</option></select></td><td><button className="icon-button"><CircleEllipsis size={18}/></button></td></tr>)}</tbody></table></div></section>{inviteOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setInviteOpen(false); }}><form className="modal-card" onSubmit={(event) => { event.preventDefault(); setInviteOpen(false); }}><div className="modal-heading"><div><span className="modal-icon"><UsersRound size={18}/></span><h2>Invite organization members</h2><p>Invite a teammate before adding them to a team.</p></div><button type="button" className="icon-button" onClick={() => setInviteOpen(false)} aria-label="Close"><X size={19}/></button></div><label className="form-label">Email addresses<input required type="email" placeholder="teammate@company.com"/></label><label className="form-label">Organization role<select><option>Member</option><option>Admin</option></select></label><div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setInviteOpen(false)}>Cancel</button><button type="submit" className="button button-primary"><Plus size={16}/>Send invite</button></div></form></div>}</>;
 }

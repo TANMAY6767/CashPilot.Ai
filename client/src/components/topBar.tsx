@@ -1,85 +1,24 @@
-import { IoMdMenu } from 'react-icons/io';
-import { useLocation } from 'react-router-dom';
-import { UserRound } from 'lucide-react';
-import { useState } from 'react';
-import ProfileDropdown from './profileDropdown';
+import { Menu, Search, Bell, ChevronRight } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
+import { useAuth } from '@/context/AuthContext';
 
-type TopBarProps = {
-  onMenuClick: () => void;
-};
+const labels: Record<string, string> = { '': 'Overview', dashboard: 'Overview', organization: 'Organizations', teams: 'Teams & budgets', expenses: 'Transactions', settings: 'Settings', profile: 'My profile' };
 
-const TopBar = ({ onMenuClick }: TopBarProps) => {
-  const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
+export default function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
   const { pathname } = useLocation();
-  const isProfilePage = pathname === '/profile';
-
-  return (
-    <>
-      <header className="w-full bg-surface border-b border-line px-4 py-3 flex items-center justify-between">
-        <button
-          type="button"
-          aria-label="Open menu"
-          onClick={onMenuClick}
-          className="w-9 h-9 flex items-center justify-center rounded-md text-text-secondary hover:bg-subtle hover:text-text-primary transition-colors"
-        >
-          <IoMdMenu size={20} />
-        </button>
-
-        <h1 className="text-sm font-semibold tracking-tight text-text-primary">
-          Team Budget Tracker
-        </h1>
-
-        <nav className="hidden sm:flex gap-6 items-center">
-          <a
-            href="#"
-            className="text-sm text-text-muted hover:text-text-primary transition-colors"
-          >
-            Home
-          </a>
-          <a
-            href="#"
-            className="text-sm text-text-muted hover:text-text-primary transition-colors"
-          >
-            About
-          </a>
-
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setIsProfileOpen(true)}
-              className="w-8 h-8 flex items-center justify-center rounded-full border border-line text-text-secondary hover:bg-subtle hover:text-text-primary transition-colors"
-            >
-              <UserRound size={18} strokeWidth={1.75} />
-            </button>
-
-            <ProfileDropdown
-              open={isProfileOpen}
-              onClose={() => setIsProfileOpen(false)}
-            />
-          </div>
-        </nav>
-      </header>
-
-      {isProfilePage && (
-        <header className="w-full bg-surface border-b border-line px-4 py-2.5 flex items-center justify-end">
-          <nav className="hidden sm:flex gap-6 items-center">
-            <a
-              href="#"
-              className="text-xs font-medium uppercase tracking-[0.12em] text-text-muted hover:text-text-primary transition-colors"
-            >
-              Organizations
-            </a>
-            <a
-              href="#"
-              className="text-xs font-medium uppercase tracking-[0.12em] text-text-muted hover:text-text-primary transition-colors"
-            >
-              Teams
-            </a>
-          </nav>
-        </header>
-      )}
-    </>
-  );
-};
-
-export default TopBar;
+  const { user, logout } = useAuth();
+  const parts = pathname.split('/').filter(Boolean);
+  const current = labels[parts[0]] || 'Organization';
+  const initials =
+  user?.name?.trim().slice(0, 2).toUpperCase() || 'JD';
+  return <header className="topbar">
+    <button className="icon-button mobile-menu" onClick={onMenuClick} aria-label="Open menu"><Menu size={20}/></button>
+    <div className="breadcrumbs"><Link to="/">Workspace</Link><ChevronRight size={14}/><span>{current}</span>{parts.length > 1 && <><ChevronRight size={14}/><span className="crumb-current">Details</span></>}</div>
+    <div className="topbar-actions">
+      <button className="search-trigger"><Search size={16}/><span>Search anything</span><kbd>⌘ K</kbd></button>
+      <button className="icon-button notification-button" aria-label="Notifications"><Bell size={18}/><i/></button>
+      <div className="topbar-divider"/>
+      <Link to="/profile" className="avatar avatar-indigo top-avatar" aria-label="My profile">{initials}</Link>
+    </div>
+  </header>;
+}

@@ -4,8 +4,8 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import AppLayout from '@/components/AppLayout';
 import LoginPage from '@/pages/LoginPage';
 import SignupPage from '@/pages/SignupPage';
+import AcceptInvitationPage from '@/pages/AcceptInvitationPage'; // ← new
 import TeamsPage from '@/pages/TeamsPage';
-import Home from '@/pages/Home';
 import OrganizationPage from '@/pages/Organization/OrganizationPage';
 import OrganizationOverview from '@/pages/Organization/OrganizationOverview';
 import DashboardPage from '@/pages/DashboardPage';
@@ -18,9 +18,17 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
+          {/* Public auth routes */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
 
+          {/* Public route — the page handles login redirect itself */}
+          <Route
+            path="/invitations/accept"
+            element={<AcceptInvitationPage />}
+          />
+
+          {/* Protected app shell */}
           <Route
             element={
               <ProtectedRoute>
@@ -28,14 +36,17 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            <Route index element={<Home />} />
+            <Route index element={<DashboardPage />} />
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="teams" element={<TeamsPage />} />
             <Route path="expenses" element={<TransactionPage />} />
             <Route path="organization" element={<OrganizationPage />} />
-            <Route path="organization/:orgId" element={<OrganizationOverview />} />
+            <Route
+              path="organization/:orgId"
+              element={<OrganizationOverview />}
+            />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import { WalletCards } from 'lucide-react';
 
 export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -15,7 +17,8 @@ export default function LoginPage() {
   const validate = () => {
     const next: typeof errors = {};
     if (!email.trim()) next.email = 'Email is required';
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) next.email = 'Enter a valid email';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      next.email = 'Enter a valid email';
     if (!password) next.password = 'Password is required';
     else if (password.length < 2) next.password = 'At least 2 characters';
     setErrors(next);
@@ -26,10 +29,16 @@ export default function LoginPage() {
     e.preventDefault();
     setServerError('');
     if (!validate()) return;
+
     setSubmitting(true);
     try {
       await login(email, password);
-      navigate('/', { replace: true });
+
+      // Honour a ?redirect=... param if present (e.g. invite flow).
+      const redirect = searchParams.get('redirect');
+      navigate(redirect && redirect.startsWith('/') ? redirect : '/', {
+        replace: true,
+      });
     } catch {
       setServerError('Login failed. Check your credentials.');
     } finally {
@@ -38,21 +47,18 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-8">
-        <h1 className="text-xl font-semibold">Log in</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Welcome back to Team Budget Tracker
-        </p>
+    <div className="auth-page"><div className="auth-brand"><span><WalletCards size={20}/></span>Cashflow</div>
+      <div className="auth-card">
+        <div className="auth-heading"><h1>Welcome back</h1><p>Sign in to your Cashflow workspace.</p></div>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>
           <div>
-            <label className="block text-sm font-medium mb-1">Email</label>
+            <label className="auth-label">Email</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              className="auth-input"
               autoComplete="email"
             />
             {errors.email && (
@@ -61,12 +67,12 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">Password</label>
+            <label className="auth-label">Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              className="auth-input"
               autoComplete="current-password"
             />
             {errors.password && (
@@ -81,19 +87,19 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="w-full rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-60"
+            className="auth-submit"
           >
             {submitting ? 'Logging in…' : 'Log in'}
           </button>
         </form>
 
-        <p className="mt-6 text-sm text-gray-500 text-center">
-          Don't have an account?{' '}
-          <Link to="/signup" className="font-medium text-gray-900 underline">
+        <p className="auth-switch">
+          Don’t have an account?{' '}
+          <Link to="/signup">
             Sign up
           </Link>
         </p>
-      </div>
+      </div><p className="auth-footnote">Simple spend management for teams</p>
     </div>
   );
 }

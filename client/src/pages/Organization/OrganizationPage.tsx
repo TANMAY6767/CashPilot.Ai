@@ -1,44 +1,69 @@
-import { useEffect, useState } from 'react';
+import { useState,useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import {
+  ArrowRight,
+  Building2,
+  CircleEllipsis,
+  Plus,
+  UsersRound,
+  X,
+} from "lucide-react";
 import {
   getAllOrgs,
   createOrg,
   type Organization,
 } from "@/services/oraganizations/org.services";
-
-import { useNavigate } from "react-router-dom";
-
-
+const initialOrganizations = [
+  {
+    id: "northstar",
+    name: "Northstar Studio",
+    initials: "N",
+    description: "Design & technology studio",
+    role: "Owner",
+    members: 24,
+    teams: 8,
+    spend: "$42,680",
+    tone: "violet",
+  },
+  {
+    id: "fieldwork",
+    name: "Fieldwork Labs",
+    initials: "F",
+    description: "Product research collective",
+    role: "Admin",
+    members: 12,
+    teams: 4,
+    spend: "$18,240",
+    tone: "green",
+  },
+];
 
 export default function OrganizationPage() {
-  const [orgs, setOrgs] = useState<Organization[]>([]);
-  const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
-  // Form states
+  const [organizations, setOrganizations] = useState(initialOrganizations);
   const [showForm, setShowForm] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [name, setName] = useState("");
+  const [orgs, setOrgs] = useState<Organization[]>([]);
   const [orgName, setOrgName] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
 
-  // Get all organizations
-const loadOrganizations = async () => {
-  try {
-    setLoading(true);
-
-    const response = await getAllOrgs();
-    console.log("tanu:- ",response);
-    setOrgs(response ?? []);
-  } catch (error) {
+  
+  const navigate = useNavigate();
+  const loadOrganizations = async() => {
+    try{
+      setLoading(true);
+      const response = await getAllOrgs();
+      setOrgs(response ?? []);
+    }catch(e){
     console.error(error);
-  } finally {
+    }finally{
     setLoading(false);
+    }
   }
-};
-
-  useEffect(() => {
-    loadOrganizations();
-  }, []);
-
-  // Create organization
+    useEffect(() => {
+      loadOrganizations();
+    }, []);
   const handleCreateOrganization = async (
     e: React.FormEvent<HTMLFormElement>
   ) => {
@@ -74,140 +99,270 @@ const loadOrganizations = async () => {
       setCreating(false);
     }
   };
-
+  
   return (
-    <div className="flex flex-col bg-white w-full h-screen">
+    <div className="page-wrap">
+      {/* Page Header */}
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">
+            <span className="eyebrow-dot" />
+            YOUR WORKSPACE
+          </div>
 
-      {/* Header */}
-      <div className="flex w-full items-center space-x-10 p-6 border-b-2 border-black">
-        <h2 className="text-3xl font-bold">
-          Organization
-        </h2>
+          <h1>Organizations</h1>
+
+          <p>
+            Manage your organizations, members, and spending.
+          </p>
+        </div>
+
         <button
-          onClick={() => {
-            setShowForm(true);
-            setError('');
-          }}
-          className="text-black h-12 font-bold bg-white px-4 rounded-lg border-2 border-black"
+          className="button button-primary"
+          onClick={() => setShowForm(true)}
         >
-          + New Organization
+          <Plus size={17} />
+          Create organization
         </button>
       </div>
 
-      {/* Content */}
-      <div className="w-full  flex-1 p-6">
+      {/* Summary */}
+      <div className="org-summary-row">
+        <div>
+          <strong>{orgs.length}</strong>
+          <span>Organizations</span>
+        </div>
 
-        {/* Loading */}
-        {loading && (
-          <p className="text-white">
-            Loading organizations...
+        <div>
+          <strong>
+            {orgs.reduce(
+              (sum, org) => sum + org.memberCount,
+              0
+            )}
+          </strong>
+          <span>Total members</span>
+        </div>
+
+        <div>
+          <strong>
+            {orgs.reduce(
+              (sum, org) => sum + org.teamCount,
+              0
+            )}
+          </strong>
+          <span>Teams across orgs</span>
+        </div>
+      </div>
+
+      {/* Section Heading */}
+      <div className="section-inline-heading org-list-heading">
+        <div>
+          <h2>Your organizations</h2>
+
+          <p>
+            Choose an organization to manage its team and settings.
           </p>
-        )}
-
-
-        {/* Organizations */}
-        {!loading && (
-  <div className="grid grid-cols-4">
-    {orgs.map((org) => (
-      <div
-        key={org.id}
-        onClick={() => navigate(`/organization/${org.id}`)}
-        className="p-6 m-3 bg-white border rounded-xl shadow-sm"
-      >
-        <h2 className="text-xl font-bold">
-          {org.name}
-        </h2>
-
-        <p className="text-gray-500">
-          {org.memberCount} members
-        </p>
-      </div>
-    ))}
-  </div>
-)}
-
+        </div>
       </div>
 
+      {/* Organizations */}
+      <div className="organization-grid">
+        {orgs.map((org) => (
+          <article
+            className="panel organization-card"
+            key={org.id}
+            onClick={() =>
+              navigate(`/organization/${org.id}`)
+            }
+          >
+            {/* Card Top */}
+            <div className="org-card-top">
+              <div
+                className={`org-avatar org-tone-violet`}
+              >
+                {org?.name?.trim().slice(0, 2).toUpperCase() || 'JD'}
+              </div>
+
+              <button
+                className="icon-button"
+                aria-label="Organization options"
+                onClick={(event) =>
+                  event.stopPropagation()
+                }
+              >
+                <CircleEllipsis size={20} />
+              </button>
+            </div>
+
+            {/* Title */}
+            <div className="org-card-title">
+              <h3>{org.name}</h3>
+
+              <span className="role-pill role-owner">
+                {org.role}
+              </span>
+            </div>
+
+            {/* Description */}
+            {/* <p className="team-description">
+              {org.description}
+            </p> */}
+
+            {/* Stats */}
+            <div className="org-card-stats">
+              <span>
+                <UsersRound size={15} />
+                {org.memberCount} members
+              </span>
+
+              <span>
+                <Building2 size={15} />
+                {org.teamCount} teams
+              </span>
+            </div>
+
+            {/* Spend */}
+            {/* <div className="org-spend-line">
+              <span>Spent this month</span>
+              <strong>{org.spend ?? 0}</strong>
+            </div> */}
+
+            {/* Footer */}
+            <button className="org-card-footer">
+              Open organization
+              <ArrowRight size={15} />
+            </button>
+          </article>
+        ))}
+
+        {/* Create Organization Card */}
+        <button
+          className="create-org-card"
+          onClick={() => setShowForm(true)}
+        >
+          <span>
+            <Plus size={20} />
+          </span>
+
+          <strong>Create a new organization</strong>
+
+          <small>
+            Set up a new workspace for your team.
+          </small>
+        </button>
+      </div>
 
       {/* Create Organization Modal */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center">
-
-          <div className="bg-white w-[400px] rounded-xl p-6 shadow-xl">
-
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowForm(false);
+            }
+          }}
+        >
+          <form
+            className="modal-card"
+            onSubmit={handleCreateOrganization}
+          >
             {/* Modal Header */}
-            <div className="flex justify-between items-center mb-6">
+            <div className="modal-heading">
+              <div>
+                <span className="modal-icon">
+                  <Building2 size={18} />
+                </span>
 
-              <h2 className="text-2xl font-bold">
-                Create Organization
-              </h2>
+                <h2>Create an organization</h2>
+
+                <p>
+                  Start managing your organization’s spending.
+                </p>
+              </div>
 
               <button
+                type="button"
+                className="icon-button"
                 onClick={() => setShowForm(false)}
-                className="text-gray-500 hover:text-black text-xl"
+                aria-label="Close"
               >
-                ✕
+                <X size={19} />
               </button>
-
             </div>
 
-
-            {/* Form */}
-            <form onSubmit={handleCreateOrganization}>
-
-              <label className="block font-medium mb-2">
-                Organization Name
-              </label>
+            {/* Organization Name */}
+            <label className="form-label">
+              Organization name
 
               <input
-                type="text"
+                autoFocus
+                required
                 value={orgName}
                 onChange={(e) => setOrgName(e.target.value)}
-                placeholder="Enter organization name"
-                className="w-full border border-gray-300 rounded-lg px-4 py-3 outline-none focus:border-black"
-                autoFocus
+                placeholder="e.g. Northstar Studio"
               />
+            </label>
 
-              {/* Error */}
-              {error && (
-                <p className="text-red-500 text-sm mt-2">
-                  {error}
-                </p>
-              )}
+            {/* Automatically Created Accounts */}
+            <div className="account-preview">
+              <span className="subtle-label">
+                ACCOUNTS CREATED AUTOMATICALLY
+              </span>
 
+              <div>
+                <span className="account-symbol cash">
+                  $
+                </span>
 
-              {/* Buttons */}
-              <div className="flex justify-end gap-3 mt-6">
+                <span>
+                  <strong>Financial Cash Account</strong>
 
-                <button
-                  type="button"
-                  onClick={() => {
+                  <small>
+                    Tracks available organization funds
+                  </small>
+                </span>
+              </div>
+
+              <div>
+                <span className="account-symbol payable">
+                  ↗
+                </span>
+
+                <span>
+                  <strong>Employee Payable Account</strong>
+
+                  <small>
+                    Tracks amounts owed to employees
+                  </small>
+                </span>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => {
                     setShowForm(false);
                     setOrgName('');
                     setError('');
                   }}
-                  className="px-4 py-2 rounded-lg border border-gray-300"
-                >
-                  Cancel
-                </button>
+              >
+                Cancel
+              </button>
 
-                <button
-                  type="submit"
-                  disabled={creating}
-                  className="px-4 py-2 rounded-lg bg-black text-white disabled:opacity-50"
-                >
-                  {creating ? 'Creating...' : 'Create'}
-                </button>
-
-              </div>
-
-            </form>
-
-          </div>
-
+              <button
+                type="submit"
+                className="button button-primary"
+              >
+                <Plus size={16} />
+                Create organization
+              </button>
+            </div>
+          </form>
         </div>
       )}
-
     </div>
   );
 }

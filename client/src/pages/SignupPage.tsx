@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import { WalletCards } from 'lucide-react';
 
 export default function SignupPage() {
   const { signup } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -21,7 +23,8 @@ export default function SignupPage() {
     const next: typeof errors = {};
     if (!name.trim()) next.name = 'Name is required';
     if (!email.trim()) next.email = 'Email is required';
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) next.email = 'Enter a valid email';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      next.email = 'Enter a valid email';
     if (!password) next.password = 'Password is required';
     else if (password.length < 8) next.password = 'At least 8 characters';
     setErrors(next);
@@ -32,10 +35,15 @@ export default function SignupPage() {
     e.preventDefault();
     setServerError('');
     if (!validate()) return;
+
     setSubmitting(true);
     try {
       await signup(name, email, password);
-      navigate('/', { replace: true });
+
+      const redirect = searchParams.get('redirect');
+      navigate(redirect && redirect.startsWith('/') ? redirect : '/', {
+        replace: true,
+      });
     } catch {
       setServerError('Sign up failed. Please try again.');
     } finally {
@@ -44,21 +52,18 @@ export default function SignupPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-8">
-        <h1 className="text-xl font-semibold">Sign up</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Create your Team Budget Tracker account
-        </p>
+    <div className="auth-page"><div className="auth-brand"><span><WalletCards size={20}/></span>Cashflow</div>
+      <div className="auth-card">
+        <div className="auth-heading"><h1>Create your account</h1><p>Start managing your team's spending.</p></div>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>
           <div>
-            <label className="block text-sm font-medium mb-1">Name</label>
+            <label className="auth-label">Name</label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              className="auth-input"
             />
             {errors.name && (
               <p className="mt-1 text-xs text-red-600">{errors.name}</p>
@@ -66,12 +71,12 @@ export default function SignupPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">Email</label>
+            <label className="auth-label">Email</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              className="auth-input"
               autoComplete="email"
             />
             {errors.email && (
@@ -80,12 +85,12 @@ export default function SignupPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">Password</label>
+            <label className="auth-label">Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              className="auth-input"
               autoComplete="new-password"
             />
             {errors.password && (
@@ -100,19 +105,19 @@ export default function SignupPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="w-full rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-60"
+            className="auth-submit"
           >
             {submitting ? 'Creating account…' : 'Sign up'}
           </button>
         </form>
 
-        <p className="mt-6 text-sm text-gray-500 text-center">
+        <p className="auth-switch">
           Already have an account?{' '}
-          <Link to="/login" className="font-medium text-gray-900 underline">
+          <Link to="/login">
             Log in
           </Link>
         </p>
-      </div>
+      </div><p className="auth-footnote">Simple spend management for teams</p>
     </div>
   );
 }

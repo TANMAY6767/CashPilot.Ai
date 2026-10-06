@@ -1,36 +1,34 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Plus } from 'lucide-react';
-import * as api from '@/services/api';
-import type { Team } from '@/types';
-import PageHeader from '@/components/PageHeader';
-import TeamCard from '@/components/TeamCard';
+import { useMemo, useState } from 'react';
+import { ArrowDownWideNarrow, ArrowRight, Download, CircleEllipsis, Plus, ReceiptText, Search, X } from 'lucide-react';
+
+type Transaction = { id: string; title: string; team: string; person: string; date: string; amount: number; category: string; initials: string; tone: string };
+const seed: Transaction[] = [
+  { id: 'TX-1042', title: 'Figma annual subscription', team: 'Product & Design', person: 'Morgan Lee', date: 'Oct 5, 2026', amount: 240, category: 'Software', initials: 'ML', tone: 'lavender' },
+  { id: 'TX-1041', title: 'Client lunch — Morrow Co.', team: 'Sales', person: 'Alex Kim', date: 'Oct 5, 2026', amount: 86.5, category: 'Meals', initials: 'AK', tone: 'peach' },
+  { id: 'TX-1040', title: 'AWS cloud infrastructure', team: 'Engineering', person: 'Jordan Davis', date: 'Oct 4, 2026', amount: 1240, category: 'Infrastructure', initials: 'JD', tone: 'mint' },
+  { id: 'TX-1039', title: 'Team offsite supplies', team: 'People & Culture', person: 'Sam Chen', date: 'Oct 2, 2026', amount: 318.2, category: 'Office', initials: 'SC', tone: 'blue' },
+  { id: 'TX-1038', title: 'Google Workspace', team: 'Engineering', person: 'Jordan Davis', date: 'Oct 1, 2026', amount: 144, category: 'Software', initials: 'JD', tone: 'lavender' },
+  { id: 'TX-1037', title: 'Conference tickets', team: 'Product & Design', person: 'Morgan Lee', date: 'Sep 29, 2026', amount: 680, category: 'Travel', initials: 'ML', tone: 'peach' },
+];
+const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n);
 
 export default function TransactionPage() {
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState(seed);
+  const [search, setSearch] = useState('');
+  const [team, setTeam] = useState('All teams');
   const [showForm, setShowForm] = useState(false);
-
-  
-
-  const load = () => {
-    setLoading(true);
-    api.getTeams().then(setTeams).finally(() => setLoading(false));
-  };
-
-  useEffect(load, []);
-
-  return (
-    <>
-    <div>
-            <h2 className="text-3xl font-bold">
-              Transaction
-            </h2>
-
-            <p className="mt-2 text-gray-600">
-              Manage your Transaction here.
-            </p>
-          </div>
-    </>
-  );
+  const [title, setTitle] = useState('');
+  const [amount, setAmount] = useState('');
+  const [selectedTeam, setSelectedTeam] = useState('Engineering');
+  const [category, setCategory] = useState('Software');
+  const filtered = useMemo(() => items.filter((item) => `${item.title} ${item.team} ${item.person} ${item.category}`.toLowerCase().includes(search.toLowerCase()) && (team === 'All teams' || item.team === team)), [items, search, team]);
+  const createTransaction = (event: React.FormEvent) => { event.preventDefault(); if (!title.trim() || !Number(amount)) return; const newItem: Transaction = { id: `TX-${1043 + items.length - seed.length}`, title: title.trim(), team: selectedTeam, person: 'Jordan Davis', date: 'Oct 5, 2026', amount: Number(amount), category, initials: 'JD', tone: 'mint' }; setItems([newItem, ...items]); setShowForm(false); setTitle(''); setAmount(''); };
+  const total = filtered.reduce((sum, item) => sum + item.amount, 0);
+  return <div className="page-wrap">
+    <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> NORTHSTAR STUDIO</div><h1>Transactions</h1><p>Review and manage spending across all your teams.</p></div><div className="heading-actions"><button className="button button-secondary"><Download size={16}/>Export</button><button className="button button-primary" onClick={() => setShowForm(true)}><Plus size={17}/>Record transaction</button></div></div>
+    <div className="transaction-stats"><div className="panel transaction-stat"><span className="metric-icon"><ReceiptText size={18}/></span><span className="subtle-label">TOTAL SPEND THIS MONTH</span><strong>$42,680.00</strong><small><span className="change-warn">↑ 12.8%</span> compared to last month</small></div><div className="panel transaction-stat"><span className="metric-icon"><ArrowDownWideNarrow size={18}/></span><span className="subtle-label">TRANSACTIONS THIS MONTH</span><strong>126</strong><small>Across 8 teams</small></div><div className="panel transaction-stat"><span className="metric-icon"><ReceiptText size={18}/></span><span className="subtle-label">AVERAGE TRANSACTION</span><strong>$338.73</strong><small>Across all categories</small></div></div>
+    <section className="panel transactions-panel ledger-panel"><div className="ledger-toolbar"><div><h2>All transactions</h2><p>Showing {filtered.length} of {items.length} transactions <span>·</span> {fmt(total)} total</p></div><div className="ledger-controls"><label className="search-field"><Search size={16}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search transactions"/></label><select className="filter-select" value={team} onChange={(event) => setTeam(event.target.value)}><option>All teams</option>{['Engineering', 'Product & Design', 'Sales', 'People & Culture'].map((option) => <option key={option}>{option}</option>)}</select><button className="button button-secondary filter-date">October 2026 <span>⌄</span></button></div></div><div className="table-scroll"><table className="data-table transaction-table"><thead><tr><th>TRANSACTION</th><th>TEAM</th><th>PAID BY</th><th>DATE</th><th>CATEGORY</th><th className="align-right">AMOUNT</th><th/></tr></thead><tbody>{filtered.map((item) => <tr key={item.id}><td><div className="transaction-title"><span className={`merchant-icon ${item.tone}`}><ReceiptText size={16}/></span><span className="transaction-copy"><strong>{item.title}</strong><small>{item.id}</small></span></div></td><td>{item.team}</td><td><div className="paid-by"><span className="avatar avatar-tiny avatar-indigo">{item.initials}</span>{item.person}</div></td><td>{item.date}</td><td><span className="category-pill">{item.category}</span></td><td className="align-right amount-cell">−{fmt(item.amount)}</td><td><button className="icon-button row-more"><CircleEllipsis size={18}/></button></td></tr>)}</tbody></table>{filtered.length === 0 && <div className="empty-state"><span><Search size={20}/></span><strong>No transactions found</strong><p>Try a different search or team filter.</p></div>}</div><div className="table-pagination"><span>Showing <strong>{filtered.length ? 1 : 0}–{filtered.length}</strong> of <strong>{filtered.length}</strong> results</span><div><button className="button button-secondary" disabled>Previous</button><button className="button button-secondary" disabled>Next <ArrowRight size={14}/></button></div></div></section>
+    <div className="bottom-note"><span className="status-dot"/> All transactions are up to date</div>
+    {showForm && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowForm(false); }}><form className="modal-card" onSubmit={createTransaction}><div className="modal-heading"><div><span className="modal-icon"><ReceiptText size={18}/></span><h2>Record a transaction</h2><p>Add an expense to a team's budget.</p></div><button type="button" className="icon-button" onClick={() => setShowForm(false)} aria-label="Close"><X size={19}/></button></div><label className="form-label">What was this for?<input autoFocus required value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Design software subscription"/></label><div className="form-two-col"><label className="form-label">Amount<div className="input-with-prefix"><span>$</span><input required min="0.01" step="0.01" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00"/></div></label><label className="form-label">Category<select value={category} onChange={(event) => setCategory(event.target.value)}>{['Software', 'Meals', 'Travel', 'Office', 'Infrastructure', 'Other'].map((x) => <option key={x}>{x}</option>)}</select></label></div><label className="form-label">Team<select value={selectedTeam} onChange={(event) => setSelectedTeam(event.target.value)}>{['Engineering', 'Product & Design', 'Sales', 'People & Culture', 'Operations'].map((x) => <option key={x}>{x}</option>)}</select></label><label className="form-label">Description<input placeholder="Optional notes"/></label><div className="form-note"><ReceiptText size={16}/> This expense will be deducted from the selected team's budget.</div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setShowForm(false)}>Cancel</button><button type="submit" className="button button-primary"><Plus size={16}/>Save transaction</button></div></form></div>}
+  </div>;
 }

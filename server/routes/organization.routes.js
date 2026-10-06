@@ -10,12 +10,15 @@ import {
   addOrganizationMember,
   updateOrganizationMemberRole,
   removeOrganizationMember,
+  sendOrgInvitationEmail,
+  acceptInvitation,
+  getInvitationDetails
 } from "../controllers/orgs.controller.js";
 
 import { checkAuth } from "../middleware/index.js";
 
 const router = Router();
-
+router.get("/invitations/:token", getInvitationDetails);
 
 // All organization routes require authentication
 router.use(checkAuth);
@@ -63,5 +66,13 @@ router
   // DELETE /organizations/:orgId/members/:memberUserId
   .delete(removeOrganizationMember);
 
+// POST /api/teams/:teamId/invitations
+router.route("/:orgId/invitations")
+  .post(sendOrgInvitationEmail);
+
+
+// POST /api/invitations/:token/accept
+router.route("/invitations/:token/accept")
+  .post(acceptInvitation);
 
 export default router;

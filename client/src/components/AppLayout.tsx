@@ -1,13 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Outlet } from 'react-router-dom';
-import TopBar from './topBar';
 import Sidebar from './Sidebar';
+import TopBar from './topBar';
 
 export default function AppLayout() {
-  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
-  const [isDark, setIsDark] = useState<boolean>(
-    () => window.localStorage.getItem('cashflow-theme') === 'dark'
-  );
+  const [isDark, setIsDark] = useState(() => window.localStorage.getItem('cashflow-theme') === 'dark');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark);
@@ -15,19 +13,12 @@ export default function AppLayout() {
   }, [isDark]);
 
   return (
-    <div className="app-shell h-screen flex flex-col bg-app text-text-primary">
-      <TopBar onMenuClick={() => setIsSidebarOpen(true)} />
-
-      <Sidebar
-        open={isSidebarOpen}
-        onClose={() => setIsSidebarOpen(false)}
-        isDark={isDark}
-        setIsDark={setIsDark}
-      />
-
-      <main className="flex-1 overflow-auto">
-        <Outlet />
-      </main>
+    <div className="app-frame">
+      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} isDark={isDark} setIsDark={setIsDark} />
+      <div className="app-main">
+        <TopBar onMenuClick={() => setSidebarOpen(true)} />
+        <main className="app-content"><Outlet /></main>
+      </div>
     </div>
   );
 }

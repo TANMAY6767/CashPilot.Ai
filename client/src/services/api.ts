@@ -26,6 +26,48 @@ export {
   restoreAccessToken,
 };
 
+export interface InvitationDetails {
+  organizationId: string;
+  organizationName: string;
+  email: string;
+  role: string;
+  status: 'pending' | 'accepted' | 'expired' | 'revoked';
+  expiresAt: string;
+}
+
+export async function acceptInvitation(
+  token: string
+): Promise<{ message: string; organizationId: string }> {
+  const response = await apiClient.post<
+    ApiEnvelope<{ organizationId: string }>
+  >(`/org/invitations/${encodeURIComponent(token)}/accept`);
+
+  if (response.error || !response.data) {
+    throw new Error(response.error || 'Failed to accept invitation');
+  }
+
+  return {
+    message: response.data.message,
+    organizationId: response.data.data.organizationId,
+  };
+}
+
+export async function getInvitationDetails(
+  token: string
+): Promise<InvitationDetails> {
+  const response = await apiClient.get<ApiEnvelope<InvitationDetails>>(
+    `/org/invitations/${encodeURIComponent(token)}`,
+    {}
+  );
+  console.log("hello tanmay:",response);
+
+  if (response.error || !response.data) {
+    throw new Error(response.error || 'Invitation not found');
+  }
+
+  return response.data.data;
+}
+
 export async function login(
   email: string,
   password: string
@@ -84,7 +126,7 @@ export async function signup(
 
 export async function getCurrentUser(): Promise<User> {
   const response =
-    await apiClient.get<User>("/users/me");
+    await apiClient.get<ApiEnvelope<User>>("/users/me");
 
   if (response.error || !response.data) {
     throw new Error(
@@ -92,7 +134,7 @@ export async function getCurrentUser(): Promise<User> {
     );
   }
 
-  return response.data;
+  return response.data.data;
 }
 
 export async function logout(): Promise<void> {
