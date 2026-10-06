@@ -14,10 +14,32 @@ import {
   Wallet,
   X,
 } from "lucide-react";
-import { getOrg, type OrganizationDetail } from "@/services/oraganizations/org.services";
+import {
+  addOrganizationFunds,
+  getFinancialCashFunds,
+  getOrganizationAccounts,
+  getOrg,
+  type OrganizationDetail,
+  type OrgAccounts,
+} from "@/services/oraganizations/org.services";
 import { sendOrganizationInvitation } from "@/services/api";
 import { useAuth } from "@/context/AuthContext";
 type Tab = "overview" | "members" | "accounts";
+
+const getAccountDescription = (account: OrgAccounts) => {
+  const name = account.name.toLowerCase();
+
+  if (name.includes('financial cash')) {
+    return 'Cash held by the organization. Owner funding increases this balance.';
+  }
+  if (name.includes('payable')) {
+    return 'Amounts the organization owes to employees and other payees.';
+  }
+  if (name.includes('capital')) {
+    return 'Owner contributions recorded for the organization.';
+  }
+  return 'Current balance calculated from this account’s ledger entries.';
+};
 
 const people = [
   {
@@ -81,6 +103,8 @@ const teams = [
 export default function OrganizationOverview() {
   const { orgId } = useParams<{ orgId: string }>();
   const [org, setOrg] = useState<OrganizationDetail | null>(null);
+  const [accounts, setAccounts] = useState<OrgAccounts[]>([]);
+  const [cashBalance, setCashBalance] = useState(0);
   const [members, setMembers] = useState(0);
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -106,9 +130,12 @@ export default function OrganizationOverview() {
   const [inviteError, setInviteError] = useState('');
   const [fundingOpen, setFundingOpen] = useState(false);
   const [fundingAmount, setFundingAmount] = useState('');
-  const [cashBalance, setCashBalance] = useState(85320);
+  const [fundingDescription, setFundingDescription] = useState('');
+  const [fundingSubmitting, setFundingSubmitting] = useState(false);
   const [fundingError, setFundingError] = useState('');
   const [fundingComplete, setFundingComplete] = useState(false);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+  const [accountsError, setAccountsError] = useState('');
 
   const sendInvite = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -132,55 +159,119 @@ export default function OrganizationOverview() {
     }
   };
   useEffect(() => {
-
     if (!orgId) return;
+    let cancelled = false;
 
     const load = async () => {
       try {
         setLoading(true);
         setError("");
-        setCashBalance(85320);
+        setOrg(null);
+        setAccounts([]);
+        setAccountsLoading(false);
+        setCashBalance(0);
+        setAccountsError('');
         const data = await getOrg(orgId);
-        console.log("babu is :- ", data);
+        if (cancelled) return;
         if (!data) {
           setError("Organization not found");
         } else {
           setOrg(data);
+
+          const isOwner = data.members.some(
+            (member) => member.userId === user?.id && member.role === 'owner'
+          );
+
+          if (isOwner) {
+            setAccountsLoading(true);
+            try {
+              const [organizationAccounts, cashFunds] = await Promise.all([
+                getOrganizationAccounts(orgId),
+                getFinancialCashFunds(orgId),
+              ]);
+              if (!cancelled) {
+                setAccounts(organizationAccounts);
+                setCashBalance(cashFunds.balance);
+              }
+            } catch (accountLoadError) {
+              if (!cancelled) {
+                setAccountsError(
+                  accountLoadError instanceof Error
+                    ? accountLoadError.message
+                    : 'Could not load organization account balances.'
+                );
+              }
+            } finally {
+              if (!cancelled) setAccountsLoading(false);
+            }
+          }
         }
       } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to load organization"
-        );
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load organization");
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     load();
-  }, [orgId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId, user?.id]);
 
   const currentMembership = org?.id === orgId
     ? org.members.find((member) => member.userId === user?.id)
     : undefined;
   const isOrganizationOwner = currentMembership?.role === 'owner';
 
-  const submitAddMoney = (event: React.FormEvent<HTMLFormElement>) => {
+  const submitAddMoney = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const amount = Number(fundingAmount);
 
-    if (!Number.isFinite(amount) || amount <= 0) {
+    if (!orgId || !Number.isFinite(amount) || amount <= 0) {
       setFundingError('Enter an amount greater than zero.');
       return;
     }
 
-    setCashBalance((balance) => balance + amount);
-    setFundingError('');
-    setFundingComplete(true);
+    try {
+      setFundingSubmitting(true);
+      setFundingError('');
+      await addOrganizationFunds(orgId, amount, fundingDescription.trim() || undefined);
+      setCashBalance((balance) => balance + amount);
+      setAccounts((currentAccounts) => currentAccounts.map((account) => {
+        const normalizedName = account.name.toLowerCase();
+        return normalizedName.includes('financial cash') || normalizedName.includes('owner capital')
+          ? { ...account, balance: account.balance + amount }
+          : account;
+      }));
+      setFundingComplete(true);
+      setFundingAmount('');
+      setFundingDescription('');
+
+      try {
+        const [organizationAccounts, cashFunds] = await Promise.all([
+          getOrganizationAccounts(orgId),
+          getFinancialCashFunds(orgId),
+        ]);
+        setAccounts(organizationAccounts);
+        setCashBalance(cashFunds.balance);
+        setAccountsError('');
+      } catch {
+        setAccountsError('Funds were added, but balances could not be refreshed. Reload the organization to see the latest balances.');
+      }
+    } catch (err) {
+      setFundingError(err instanceof Error ? err.message : 'Could not add funds.');
+    } finally {
+      setFundingSubmitting(false);
+    }
   };
 
   const closeFunding = () => {
     setFundingOpen(false);
     setFundingAmount('');
+    setFundingDescription('');
     setFundingError('');
     setFundingComplete(false);
   };
@@ -275,7 +366,7 @@ export default function OrganizationOverview() {
             className={`tab-button ${tab === "accounts" ? "tab-active" : ""}`}
             onClick={() => setTab("accounts")}
           >
-            Accounts <span>{org.accounts.filter((a) => a.name !== "Owner Capital Account").length}</span>
+            Accounts <span>{accounts.length}</span>
           </button>
         )}
       </div>
@@ -400,7 +491,7 @@ export default function OrganizationOverview() {
           </div>
 
           {/* Accounts Strip */}
-          <section className="panel account-strip">
+          {isOrganizationOwner && <section className="panel account-strip">
             <div className="account-strip-icon">
               <ShieldCheck size={20} />
             </div>
@@ -421,7 +512,7 @@ export default function OrganizationOverview() {
               View accounts
               <ArrowRight size={14} />
             </button>
-          </section>
+          </section>}
         </>
       )}
 
@@ -525,7 +616,7 @@ export default function OrganizationOverview() {
       )}
 
       {/* Accounts Tab */}
-      {tab === "accounts" && (
+      {tab === "accounts" && isOrganizationOwner && (
         <>
           <div className="section-inline-heading account-heading">
             <div>
@@ -539,17 +630,19 @@ export default function OrganizationOverview() {
           </div>
 
           <div className="account-grid">
-            {org.accounts.filter((acc) => acc.name !== "Owner Capital Account").map((acc) => (
+            {accountsLoading ? (
+              <section className="panel p-5 text-sm">Loading account balances…</section>
+            ) : accountsError ? (
+              <section className="panel p-5 text-sm text-red-600" role="alert">{accountsError}</section>
+            ) : accounts.map((acc) => (
               <AccountCard
                 key={acc.id}
                 icon={<Wallet size={20} />}
                 tone="mint"
                 name={acc.name}
                 type={acc.accountType}
-                amount={acc.name.toLowerCase() === 'financial cash account'
-                  ? `$${cashBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                  : "$85,320.00"}
-                description="Available funds held by your organization. Transactions assigned to this account reduce its balance."
+                amount={`$${(acc.name.toLowerCase() === 'financial cash account' ? cashBalance : acc.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                description={getAccountDescription(acc)}
                 canAddMoney={isOrganizationOwner && acc.name.toLowerCase() === 'financial cash account'}
                 onAddMoney={() => {
                   setFundingOpen(true);
@@ -558,6 +651,9 @@ export default function OrganizationOverview() {
                 }}
               />
             ))}
+            {!accountsLoading && !accountsError && accounts.length === 0 && (
+              <section className="panel p-5 text-sm">No organization accounts found.</section>
+            )}
 
           </div>
 
@@ -565,8 +661,7 @@ export default function OrganizationOverview() {
             <ShieldCheck size={17} />
 
             <span>
-              These system accounts are created automatically for every organization.
-              {!isOrganizationOwner && ' Only the organization owner can add money to the cash account.'}
+              Account balances are calculated from their ledger entries. Accounts without ledger activity start at $0.00.
             </span>
           </div>
         </>
@@ -578,7 +673,7 @@ export default function OrganizationOverview() {
         Organization data is up to date
       </div>
 
-      {fundingOpen && (
+      {fundingOpen && isOrganizationOwner && (
         <div
           className="modal-backdrop"
           onMouseDown={(event) => {
@@ -600,8 +695,8 @@ export default function OrganizationOverview() {
             {fundingComplete ? (
               <div className="invite-success">
                 <span><Check size={20} /></span>
-                <strong>Balance preview updated</strong>
-                <small>The updated amount is shown for this session.</small>
+                <strong>Funds added</strong>
+                <small>{accountsError || 'The cash and capital account balances are up to date.'}</small>
                 <div className="modal-actions">
                   <button type="button" className="button button-primary" onClick={closeFunding}>Done</button>
                 </div>
@@ -624,10 +719,21 @@ export default function OrganizationOverview() {
                     />
                   </div>
                 </label>
+                <label className="form-label">Description (optional)
+                  <input
+                    type="text"
+                    maxLength={500}
+                    placeholder="e.g. Initial organization funding"
+                    value={fundingDescription}
+                    onChange={(event) => setFundingDescription(event.target.value)}
+                  />
+                </label>
                 {fundingError && <p role="alert" className="text-sm text-red-600">{fundingError}</p>}
                 <div className="modal-actions">
                   <button type="button" className="button button-secondary" onClick={closeFunding}>Cancel</button>
-                  <button type="submit" className="button button-primary"><Plus size={16} />Add money</button>
+                  <button type="submit" className="button button-primary" disabled={fundingSubmitting}>
+                    <Plus size={16} />{fundingSubmitting ? 'Adding funds…' : 'Add money'}
+                  </button>
                 </div>
               </>
             )}

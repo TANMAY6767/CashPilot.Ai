@@ -1,247 +1,203 @@
 import prisma from "../prisma/client.js";
-import crypto from "crypto";
+import { ApiError } from "../utils/ApiError.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { sendResponse, statusType } from "../utils/index.js";
 import { sendEmail } from "../services/email.service.js";
+import crypto from "crypto";
+
+const getUserId = (req) => req.user?.sub;
 
 
-const getUserId = (req) => req.user?._id;
 
 
 /* =========================================================
    GET ALL TEAMS OF AN ORGANIZATION
    ========================================================= */
 
-const getAllTeams = async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const { orgId } = req.params;
 
-    if (!userId) {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
-    }
+const getAllTeams = asyncHandler(async (req, res) => {
+  
+  const userId = getUserId(req);
+  const { orgId } = req.params;
 
-    if (!orgId) {
-      return res.status(400).json({
-        message: "Organization ID is required",
-      });
-    }
 
-    /*
-      First check whether logged-in user belongs
-      to this organization.
-    */
+  if (!userId) {
+    throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized");
+  }
+  if (!orgId) {
+    throw new ApiError(statusType.BAD_REQUEST, "Organization ID is required.");
+  }
 
-    const orgMember = await prisma.organizationMember.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
+  const teams = await prisma.team.findMany({
+    where: {
+      organizationId:orgId
+    },
+    orderBy: { createdAt: "desc" },
+
+    select: {
+      id: true,
+      name: true,
+      organizationId: true,
+      createdById: true,
+      createdAt: true,
+
+      _count: {
+        select: {
+          members: true,
+        },
+      },
+
+      members: {
+        where: {
           userId,
         },
-      },
-    });
-
-    if (!orgMember) {
-      return res.status(403).json({
-        message: "You are not a member of this organization",
-      });
-    }
-
-    const teams = await prisma.team.findMany({
-      where: {
-        organizationId: orgId,
-      },
-
-      orderBy: {
-        createdAt: "desc",
-      },
-
-      select: {
-        id: true,
-        name: true,
-        organizationId: true,
-        createdById: true,
-        createdAt: true,
-        updatedAt: true,
-
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-
-        _count: {
-          select: {
-            members: true,
-            transactions: true,
-            accounts: true,
-          },
-        },
-
-        budget: {
-          select: {
-            id: true,
-            totalBudget: true,
-            currency: true,
-          },
+        select: {
+          role: true,
         },
       },
-    });
+      budget:{
+        select:{
+          totalBudget:true,
+          currency:true
+        }
+      }
+    },
+  });
 
-    return res.status(200).json({
-      message: "Teams fetched successfully",
-      teams,
-    });
+  return sendResponse(
+    res,
+    "success",
+    teams,
+    "teams Fetched",
+    statusType.OK
+  )
 
-  } catch (error) {
-    console.error("getAllTeams:", error);
-
-    return res.status(500).json({
-      message: "Failed to get teams",
-    });
-  }
-};
-
+});
 
 /* =========================================================
    GET ONE TEAM
    ========================================================= */
 
-const getOneTeam = async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const { teamId } = req.params;
+const getOneTeam = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { teamId } = req.params;
 
-    if (!userId) {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
-    }
-
-    /*
-      Find team only if the logged-in user belongs
-      to its organization.
-    */
-
-    const team = await prisma.team.findFirst({
-      where: {
-        id: teamId,
-
-        organization: {
-          members: {
-            some: {
-              userId,
-            },
-          },
-        },
-      },
-
-      select: {
-        id: true,
-        name: true,
-        organizationId: true,
-        createdById: true,
-        createdAt: true,
-        updatedAt: true,
-
-        organization: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-
-        members: {
-          select: {
-            id: true,
-            userId: true,
-            role: true,
-            joinedAt: true,
-
-            user: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-              },
-            },
-          },
-        },
-
-        budget: {
-          select: {
-            id: true,
-            totalBudget: true,
-            currency: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-        },
-
-        _count: {
-          select: {
-            members: true,
-            transactions: true,
-            accounts: true,
-          },
-        },
-      },
-    });
-
-    if (!team) {
-      return res.status(404).json({
-        message: "Team not found",
-      });
-    }
-
-    return res.status(200).json({
-      message: "Team fetched successfully",
-      team,
-    });
-
-  } catch (error) {
-    console.error("getOneTeam:", error);
-
-    return res.status(500).json({
-      message: "Failed to get team",
-    });
+  if (!userId) {
+    throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized");
   }
-};
+  if (!teamId) {
+    throw new ApiError(statusType.BAD_REQUEST, "Team ID is required.");
+  }
+
+  /*
+    Find the team only if the logged-in user belongs to its
+    organization. This doubles as the membership check — no
+    separate query needed.
+  */
+  const team = await prisma.team.findFirst({
+    where: {
+      id: teamId,
+      organization: {
+        members: {
+          some: { userId },
+        },
+      },
+    },
+
+    select: {
+      id: true,
+      name: true,
+      organizationId: true,
+      createdById: true,
+      createdAt: true,
+      updatedAt: true,
+
+      organization: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+
+      createdBy: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      },
+
+      members: {
+        select: {
+          id: true,
+          userId: true,
+          role: true,
+          joinedAt: true,
+
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+      },
+
+      budget: {
+        select: {
+          id: true,
+          totalBudget: true,
+          currency: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+
+      _count: {
+        select: {
+          members: true,
+          transactions: true,
+          accounts: true,
+        },
+      },
+    },
+  });
+
+  if (!team) {
+    throw new ApiError(statusType.NOT_FOUND, "Team not found.");
+  }
+
+  return sendResponse(
+    res,
+    "success",
+    team,
+    "Team fetched successfully.",
+    statusType.OK
+  );
+});
 
 
 /* =========================================================
    CREATE TEAM
    ========================================================= */
 
-const createTeam = async (req, res) => {
-  try {
-    const userId = req.user?._id;
-    const { orgId } = req.params;
-    const name = req.body.name?.trim();
+const createTeam = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { orgId } = req.params;
+  const name = req.body.name?.trim();
 
-    if (!userId) {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
-    }
+  if (!userId) {
+    throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized");
+  }
 
-    if (!orgId || !name) {
+  if (!orgId || !name) {
       return res.status(400).json({
         message: "Organization ID and team name are required",
       });
     }
 
-    const orgMember = await prisma.organizationMember.findUnique({
+  const orgMember = await prisma.organizationMember.findUnique({
       where: {
         organizationId_userId: {
           organizationId: orgId,
@@ -251,14 +207,27 @@ const createTeam = async (req, res) => {
     });
 
     if (!orgMember) {
-      return res.status(403).json({
-        message: "You are not a member of this organization",
-      });
+      throw new ApiError(
+      statusType.FORBIDDEN,
+      "You are not a member of this organization."
+    );
     }
 
-    const team = await prisma.$transaction(async (tx) => {
+  const existingTeam = await prisma.team.findFirst({
+    where: {
+      name,
+      createdById: userId,
+    },
+  });
 
-      const newTeam = await tx.team.create({
+  if (existingTeam) {
+    throw new ApiError(
+      statusType.CONFLICT,
+      "You already have an organization with this name."
+    );
+  }
+
+  const newTeam = await prisma.team.create({
         data: {
           name,
           organizationId: orgId,
@@ -271,26 +240,17 @@ const createTeam = async (req, res) => {
             },
           },
         },
-      });
+  });
 
-      await createDefaultAccounts(tx, newTeam.id);
 
-      return newTeam;
-    });
-
-    return res.status(201).json({
-      message: "Team created successfully",
-      team,
-    });
-
-  } catch (error) {
-    console.error("createTeam:", error);
-
-    return res.status(500).json({
-      message: "Failed to create team",
-    });
-  }
-};
+  return sendResponse(
+    res,
+    "success",
+    newTeam,
+    "newTeam created successfully",
+    statusType.OK
+  )
+});
 
 
 /* =========================================================

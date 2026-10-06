@@ -38,6 +38,13 @@ export interface OrgAccounts {
   createdAt: string;
   organizationId: string;
   teamId: string | null;
+  balance: number;
+}
+
+export interface FinancialCashFunds {
+  accountId: string;
+  accountName: string;
+  balance: number;
 }
 
 export interface OrganizationDetail {
@@ -49,7 +56,6 @@ export interface OrganizationDetail {
   createdBy: { id: string; name: string; email: string };
   members: OrgMember[];
   teams: OrgTeam[];
-  accounts: OrgAccounts[]
 }
 
 // ---- List response ----
@@ -105,6 +111,50 @@ export const getOrg = async (
     `/org/${orgId}`
   );
   return response.data?.data ?? null;
+};
+
+interface DataEnvelope<T> {
+  data: T;
+  message: string;
+}
+
+export const getOrganizationAccounts = async (orgId: string): Promise<OrgAccounts[]> => {
+  const response = await apiClient.get<DataEnvelope<OrgAccounts[]>>(
+    `/org/${encodeURIComponent(orgId)}/accounts`
+  );
+
+  if (response.error || !response.data) {
+    throw new Error(response.error || "Could not load organization accounts.");
+  }
+
+  return response.data.data;
+};
+
+export const getFinancialCashFunds = async (orgId: string): Promise<FinancialCashFunds> => {
+  const response = await apiClient.get<DataEnvelope<FinancialCashFunds>>(
+    `/org/${encodeURIComponent(orgId)}/getfunds`
+  );
+
+  if (response.error || !response.data) {
+    throw new Error(response.error || "Could not load the cash account balance.");
+  }
+
+  return response.data.data;
+};
+
+export const addOrganizationFunds = async (
+  orgId: string,
+  amount: number,
+  description?: string
+): Promise<void> => {
+  const response = await apiClient.post<DataEnvelope<unknown>>(
+    `/org/${encodeURIComponent(orgId)}/addfunds`,
+    { amount, description }
+  );
+
+  if (response.error || !response.data) {
+    throw new Error(response.error || "Could not add funds.");
+  }
 };
 
 

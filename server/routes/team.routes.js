@@ -27,16 +27,17 @@ router.use(checkAuth);
 // =========================================================
 
 // GET  /api/organizations/:orgId/teams
-router.route("/organizations/:orgId/teams")
+router.route("/:orgId/teams")
   .get(getAllTeams)
   .post(createTeam);
+  
 
 
 // GET    /api/teams/:teamId
 // PATCH  /api/teams/:teamId
 // DELETE /api/teams/:teamId
 
-router.route("/teams/:teamId")
+router.route("/:orgId/teams/:teamId")
   .get(getOneTeam)
   .patch(updateTeam)
   .delete(deleteTeam);

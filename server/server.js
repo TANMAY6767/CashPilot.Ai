@@ -31,11 +31,11 @@ app.get("/",(req, res) => {
 app.use("/users", userRoutes);
 app.use("/org", orgRoutes);
 app.use("/", teamRoutes);
-app.use("/teams", accountRoutes);
-app.use("/teams", budgetRoutes);
-app.use("/teams", ledgerRoutes);
-app.use("/teams", transactionRoutes);
-app.use("/audit-logs", auditLogsRoutes);
+// app.use("/teams", accountRoutes);
+// app.use("/teams", budgetRoutes);
+// app.use("/teams", ledgerRoutes);
+// app.use("/teams", transactionRoutes);
+// app.use("/audit-logs", auditLogsRoutes);
 
 app.use((error, req, res, next) => {
     if (res.headersSent) return next(error);

@@ -244,16 +244,6 @@ const getOrganization = asyncHandler(async (req, res) => {
           },
         },
       },
-      accounts: {
-        select: {
-          id: true,
-          name: true,
-          organizationId: true,
-          teamId: true,
-          accountType: true,
-          createdAt: true
-        },
-      }
     },
   });
 
@@ -975,12 +965,13 @@ const getOrganizationAccounts = asyncHandler(async (req, res) => {
     throw new ApiError(statusType.FORBIDDEN, "You are not a member of this organization.")
   }
   if (requester.role !== "owner") {
-    throw new ApiError(statusType.FORBIDDEN, "Only the organization owner can add it.")
+    throw new ApiError(statusType.FORBIDDEN, "Only the organization owner can view account balances.")
   }
 
   const accounts = await prisma.account.findMany({
     where: {
       organizationId: orgId,
+      teamId: null,
     },
 
     select: {
@@ -989,14 +980,39 @@ const getOrganizationAccounts = asyncHandler(async (req, res) => {
       organizationId: true,
       teamId: true,
       accountType: true,
-      createdAt: true
+      createdAt: true,
     },
+  });
+
+  const totalsByAccount = accounts.length
+    ? await prisma.ledgerEntry.groupBy({
+      by: ["accountId"],
+      where: { accountId: { in: accounts.map((account) => account.id) } },
+      _sum: { debit: true, credit: true },
+    })
+    : [];
+  const totalsByAccountId = new Map(
+    totalsByAccount.map((totals) => [totals.accountId, totals._sum])
+  );
+
+  const accountsWithBalances = accounts.map((account) => {
+    const totals = totalsByAccountId.get(account.id);
+    const debit = parseAmount(totals?.debit?.toString() ?? "0") ?? 0n;
+    const credit = parseAmount(totals?.credit?.toString() ?? "0") ?? 0n;
+    const balanceInCents = account.accountType === "asset"
+      ? debit - credit
+      : credit - debit;
+
+    return {
+      ...account,
+      balance: Number(balanceInCents) / 100,
+    };
   });
 
   return sendResponse(
     res,
     "success",
-    accounts,
+    accountsWithBalances,
     "Organization accounts fetched successfully.",
     statusType.OK
   );
@@ -1005,6 +1021,7 @@ const getOrganizationAccounts = asyncHandler(async (req, res) => {
 const addFunds = asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   const { orgId } = req.params;
+  console.log("================================:",orgId);
   const { amount, description } = req.body;
 
   if (!userId) {
@@ -1013,6 +1030,13 @@ const addFunds = asyncHandler(async (req, res) => {
   if (!orgId) {
     throw new ApiError(statusType.BAD_REQUEST, "Organization ID is required.");
   }
+
+  const amountInCents = parseAmount(amount);
+  if (amountInCents === null || amountInCents <= 0n) {
+    throw new ApiError(statusType.BAD_REQUEST, "Enter a positive amount with up to two decimal places.");
+  }
+  const normalizedAmount = normalizeAmount(amount);
+
   const requester = await prisma.organizationMember.findUnique({
     where: {
       organizationId_userId: {
@@ -1036,7 +1060,7 @@ const addFunds = asyncHandler(async (req, res) => {
     const cashAccount = await tx.account.findFirst({
       where: {
         organizationId:orgId,
-        name: "Financial Cash Account",
+        name: { equals: "Financial cash Account", mode: "insensitive" },
         accountType: "asset",
         teamId: null,
       },
@@ -1064,18 +1088,20 @@ const addFunds = asyncHandler(async (req, res) => {
         teamId: null,
         createdById: userId,
         transactionType: "FUNDING",
-        description: description ?? "Owner funding",
+        description: typeof description === "string" && description.trim()
+          ? description.trim()
+          : "Owner funding",
         ledgerEntries: {
           create: [
             {
               accountId: cashAccount.id,
-              debit: amount,
+              debit: normalizedAmount,
               credit: 0,
             },
             {
               accountId: capitalAccount.id,
               debit: 0,
-              credit: amount,
+              credit: normalizedAmount,
             },
           ],
         },
@@ -1132,17 +1158,17 @@ const getFinancialCashFunds = asyncHandler(async (req, res) => {
     );
   }
   if (requester.role !== "owner") {
-  throw new ApiError(
-    statusType.FORBIDDEN,
-    "Only the organization owner can add it."
-  );
+    throw new ApiError(
+      statusType.FORBIDDEN,
+      "Only the organization owner can view account balances."
+    );
 }
 
 
   const cashAccount = await prisma.account.findFirst({
     where: {
       organizationId: orgId,
-      name: "Financial Cash Account",
+      name: { equals: "Financial cash Account", mode: "insensitive" },
       accountType: "asset",
       teamId: null,
     },
@@ -1170,9 +1196,9 @@ const getFinancialCashFunds = asyncHandler(async (req, res) => {
     },
   });
 
-  const balance =
-    Number(totals._sum.debit ?? 0) -
-    Number(totals._sum.credit ?? 0);
+  const debit = parseAmount(totals._sum.debit?.toString() ?? "0") ?? 0n;
+  const credit = parseAmount(totals._sum.credit?.toString() ?? "0") ?? 0n;
+  const balance = Number(debit - credit) / 100;
 
   return sendResponse(
     res,

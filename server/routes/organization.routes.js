@@ -15,6 +15,7 @@ import {
   getInvitationDetails,
   getOrganizationAccounts,
   getFinancialCashFunds,
+  addFunds
 } from "../controllers/orgs.controller.js";
 
 import { checkAuth } from "../middleware/index.js";
@@ -79,6 +80,9 @@ router.route("/invitations/:token/accept")
 
 router.route("/:orgId/accounts")
   .get(getOrganizationAccounts);
+
+router.route("/:orgId/addfunds")
+  .post(addFunds);
 
 router.route("/:orgId/getfunds")
   .get(getFinancialCashFunds);
