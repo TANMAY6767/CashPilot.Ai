@@ -70,32 +70,6 @@ const getTeamAccess = async (teamId, userId) => {
   through the normal API.
 */
 
-const createDefaultAccounts = async (tx, teamId) => {
-  const defaultAccounts = [
-    {
-      name: "Cash",
-      accountType: "system",
-    },
-    {
-      name: "Company Expenses",
-      accountType: "system",
-    },
-    {
-      name: "Reimbursement Pool",
-      accountType: "system",
-    },
-  ];
-
-  await tx.account.createMany({
-    data: defaultAccounts.map((account) => ({
-      teamId,
-      name: account.name,
-      accountType: account.accountType,
-      ownerUserId: null,
-    })),
-  });
-};
-
 
 /* =========================================================
    2. GET ALL ACCOUNTS OF A TEAM
@@ -180,7 +154,6 @@ const getTeamAccounts = async (req, res) => {
     });
   }
 };
-
 
 /* =========================================================
    3. GET ONE ACCOUNT
@@ -769,7 +742,6 @@ const deleteAccount = async (req, res) => {
    ========================================================= */
 
 export {
-  createDefaultAccounts,
   getTeamAccounts,
   getAccount,
   createCustomAccount,

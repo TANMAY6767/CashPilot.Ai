@@ -14,11 +14,8 @@ import {
   Wallet,
   X,
 } from "lucide-react";
-import {
-  createOrg,
-  getOrg,
-  type OrganizationDetail,
-} from "@/services/oraganizations/org.services";
+import { getOrg, type OrganizationDetail } from "@/services/oraganizations/org.services";
+import { sendOrganizationInvitation } from "@/services/api";
 type Tab = "overview" | "members" | "accounts";
 
 const people = [
@@ -103,19 +100,29 @@ export default function OrganizationOverview() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [orgRole, setOrgRole] = useState("Member");
+  const [sendingInvite, setSendingInvite] = useState(false);
+  const [inviteError, setInviteError] = useState('');
 
-  const sendInvite = (event: React.FormEvent) => {
+  const sendInvite = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    if (!email.trim()) return;
+    if (!orgId || !email.trim()) return;
 
-    setSent(true);
-    setEmail("");
-
-    window.setTimeout(() => {
-      setSent(false);
-      setInviteOpen(false);
-    }, 1400);
+    try {
+      setSendingInvite(true);
+      setInviteError('');
+      await sendOrganizationInvitation(
+        orgId,
+        email.trim(),
+        orgRole.toLowerCase()
+      );
+      setSent(true);
+      setEmail("");
+    } catch (err) {
+      setInviteError(err instanceof Error ? err.message : 'Could not send invitation.');
+    } finally {
+      setSendingInvite(false);
+    }
   };
 useEffect(() => {
 
@@ -197,10 +204,11 @@ useEffect(() => {
           </button>
 
           <button
-            className="button button-primary"
+          className="button button-primary"
             onClick={() => {
               setInviteOpen(true);
               setSent(false);
+              setInviteError('');
             }}
           >
             <Plus size={17} />
@@ -493,23 +501,17 @@ useEffect(() => {
           </div>
 
           <div className="account-grid">
-            <AccountCard
+            {org.accounts.filter((acc) => acc.name !== "Owner Capital Account").map((acc) => (
+                <AccountCard
               icon={<Wallet size={20} />}
               tone="mint"
-              name="Financial Cash Account"
-              type="Cash account"
+              name={acc.name}
+              type={acc.accountType}
               amount="$85,320.00"
               description="Available funds held by your organization. Transactions assigned to this account reduce its balance."
             />
-
-            <AccountCard
-              icon={<CreditCard size={20} />}
-              tone="peach"
-              name="Employee Payable Account"
-              type="Payable account"
-              amount="$4,280.00"
-              description="Tracks amounts the organization owes to team members for expenses they've paid."
-            />
+            ))}
+            
           </div>
 
           <div className="account-hint">
@@ -536,6 +538,7 @@ useEffect(() => {
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
               setInviteOpen(false);
+              setInviteError('');
             }
           }}
         >
@@ -561,7 +564,10 @@ useEffect(() => {
               <button
                 type="button"
                 className="icon-button"
-                onClick={() => setInviteOpen(false)}
+                onClick={() => {
+                  setInviteOpen(false);
+                  setInviteError('');
+                }}
                 aria-label="Close"
               >
                 <X size={19} />
@@ -599,6 +605,12 @@ useEffect(() => {
                   />
                 </label>
 
+                {inviteError && (
+                  <p role="alert" className="text-sm text-red-600">
+                    {inviteError}
+                  </p>
+                )}
+
                 {/* Organization Role */}
                 <label className="form-label">
                   Organization role
@@ -631,7 +643,10 @@ useEffect(() => {
                   <button
                     type="button"
                     className="button button-secondary"
-                    onClick={() => setInviteOpen(false)}
+                    onClick={() => {
+                      setInviteOpen(false);
+                      setInviteError('');
+                    }}
                   >
                     Cancel
                   </button>
@@ -639,9 +654,10 @@ useEffect(() => {
                   <button
                     type="submit"
                     className="button button-primary"
+                    disabled={sendingInvite}
                   >
                     <Plus size={16} />
-                    Send invitation
+                    {sendingInvite ? 'Sending…' : 'Send invitation'}
                   </button>
                 </div>
               </>

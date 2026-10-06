@@ -98,7 +98,7 @@ export default function AcceptInvitationPage() {
 
         // Redirect into the org after a short pause
         setTimeout(() => {
-          navigate(`/organization`, {
+          navigate(`/organization/${result.organizationId}`, {
             replace: true,
           });
         }, 1200);

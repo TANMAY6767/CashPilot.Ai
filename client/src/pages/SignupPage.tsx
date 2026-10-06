@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import { getInvitationDetails } from '@/services/api';
 import { WalletCards } from 'lucide-react';
 
 export default function SignupPage() {
@@ -19,6 +20,27 @@ export default function SignupPage() {
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState('');
 
+  useEffect(() => {
+    const redirect = searchParams.get('redirect');
+    if (!redirect) return;
+
+    const token = new URLSearchParams(redirect.split('?')[1] || '').get('token');
+    if (!token) return;
+
+    let cancelled = false;
+    getInvitationDetails(token)
+      .then((invitation) => {
+        if (!cancelled) setEmail((current) => current || invitation.email);
+      })
+      .catch(() => {
+        // Signup can continue; the invite page will explain an invalid link.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams]);
+
   const validate = () => {
     const next: typeof errors = {};
     if (!name.trim()) next.name = 'Name is required';
@@ -26,7 +48,7 @@ export default function SignupPage() {
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
       next.email = 'Enter a valid email';
     if (!password) next.password = 'Password is required';
-    else if (password.length < 8) next.password = 'At least 8 characters';
+    else if (password.length < 3) next.password = 'At least 3 characters';
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -113,7 +135,7 @@ export default function SignupPage() {
 
         <p className="auth-switch">
           Already have an account?{' '}
-          <Link to="/login">
+          <Link to={searchParams.get('redirect') ? `/login?redirect=${encodeURIComponent(searchParams.get('redirect')!)}` : '/login'}>
             Log in
           </Link>
         </p>

@@ -59,13 +59,28 @@ export async function getInvitationDetails(
     `/org/invitations/${encodeURIComponent(token)}`,
     {}
   );
-  console.log("hello tanmay:",response);
-
   if (response.error || !response.data) {
     throw new Error(response.error || 'Invitation not found');
   }
 
   return response.data.data;
+}
+
+export async function sendOrganizationInvitation(
+  organizationId: string,
+  email: string,
+  role: string
+): Promise<{ message: string }> {
+  const response = await apiClient.post<ApiEnvelope<null>>(
+    `/org/${encodeURIComponent(organizationId)}/invitations`,
+    { email, role }
+  );
+
+  if (response.error || !response.data) {
+    throw new Error(response.error || 'Failed to send invitation');
+  }
+
+  return { message: response.data.message };
 }
 
 export async function login(

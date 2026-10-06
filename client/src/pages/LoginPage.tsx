@@ -7,6 +7,7 @@ export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const redirect = searchParams.get('redirect');
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -35,7 +36,6 @@ export default function LoginPage() {
       await login(email, password);
 
       // Honour a ?redirect=... param if present (e.g. invite flow).
-      const redirect = searchParams.get('redirect');
       navigate(redirect && redirect.startsWith('/') ? redirect : '/', {
         replace: true,
       });
@@ -95,7 +95,7 @@ export default function LoginPage() {
 
         <p className="auth-switch">
           Don’t have an account?{' '}
-          <Link to="/signup">
+          <Link to={redirect ? `/signup?redirect=${encodeURIComponent(redirect)}` : '/signup'}>
             Sign up
           </Link>
         </p>

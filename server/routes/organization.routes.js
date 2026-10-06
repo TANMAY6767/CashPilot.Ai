@@ -12,7 +12,8 @@ import {
   removeOrganizationMember,
   sendOrgInvitationEmail,
   acceptInvitation,
-  getInvitationDetails
+  getInvitationDetails,
+  getOrganizationAccounts
 } from "../controllers/orgs.controller.js";
 
 import { checkAuth } from "../middleware/index.js";
@@ -74,5 +75,8 @@ router.route("/:orgId/invitations")
 // POST /api/invitations/:token/accept
 router.route("/invitations/:token/accept")
   .post(acceptInvitation);
+
+router.route("/:orgId/accounts")
+  .get(getOrganizationAccounts);
 
 export default router;

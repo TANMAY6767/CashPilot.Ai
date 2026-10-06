@@ -308,6 +308,7 @@ export default function OrganizationPage() {
               <span className="subtle-label">
                 ACCOUNTS CREATED AUTOMATICALLY
               </span>
+              
 
               <div>
                 <span className="account-symbol cash">

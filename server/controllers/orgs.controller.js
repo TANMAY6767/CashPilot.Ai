@@ -24,12 +24,16 @@ const createOrg = asyncHandler(async (req, res) => {
   const existingOrg = await prisma.organization.findFirst({
     where: {
       name,
-    }
+      createdById: userId,
+    },
   });
 
   if (existingOrg) {
-    throw new ApiError(statusType.CONFLICT, "Organization already exists.")
-  }
+  throw new ApiError(
+    statusType.CONFLICT,
+    "You already have an organization with this name."
+  );
+}
 
   const organization = await prisma.$transaction(async (tx) => {
     const org = await tx.organization.create({
@@ -65,15 +69,22 @@ const createOrg = asyncHandler(async (req, res) => {
       data: {
         organizationId: org.id,
         accountType: "asset",
-        name: "financial cash Account",
+        name: "Financial cash Account",
       }
     });
 
     await tx.account.create({
       data: {
         organizationId: org.id,
-        accountType: "labibility",
-        name: "employee Payable Account",
+        accountType: "liability",
+        name: "Employee Payable Account",
+      }
+    });
+    await tx.account.create({
+      data: {
+        organizationId: org.id,
+        accountType: "equity",
+        name: "Owner Capital Account",
       }
     });
 
@@ -190,26 +201,36 @@ const getOrganization = asyncHandler(async (req, res) => {
           },
         },
       },
-      teams:{
-        select:{
+      teams: {
+        select: {
           id: true,
           name: true,
           createdById: true,
           createdAt: true,
 
           _count: {
-              select: {
-                members: true,
-                transactions: true,
-              },
+            select: {
+              members: true,
+              transactions: true,
             },
+          },
         },
       },
+      accounts: {
+        select: {
+          id: true,
+          name: true,
+          organizationId: true,
+          teamId: true,
+          accountType: true,
+          createdAt: true
+        },
+      }
     },
   });
 
-  if(!organization){
-    throw new ApiError(statusType.NOT_FOUND,"Organization not found.")
+  if (!organization) {
+    throw new ApiError(statusType.NOT_FOUND, "Organization not found.")
   }
 
   return sendResponse(
@@ -222,7 +243,7 @@ const getOrganization = asyncHandler(async (req, res) => {
 
 });
 
-const updateOrganization = asyncHandler(async(req,res) => {
+const updateOrganization = asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   const { orgId } = req.params;
   const name = req.body.name?.trim();
@@ -239,7 +260,7 @@ const updateOrganization = asyncHandler(async(req,res) => {
 
   const membership = await prisma.organizationMember.findUnique({
     where: {
-        organizationId_userId: {
+      organizationId_userId: {
         organizationId: orgId,
         userId,
       },
@@ -249,21 +270,21 @@ const updateOrganization = asyncHandler(async(req,res) => {
     },
   });
 
-  if(!membership){
-    throw new ApiError(statusType.FORBIDDEN,"You are not a member of this organization.") 
+  if (!membership) {
+    throw new ApiError(statusType.FORBIDDEN, "You are not a member of this organization.")
   }
   if (membership.role !== "owner") {
-      throw new ApiError(statusType.FORBIDDEN,"Only the organization owner can update it.") 
+    throw new ApiError(statusType.FORBIDDEN, "Only the organization owner can update it.")
   }
 
   const organization = await prisma.organization.update({
-    where:{
-      id:orgId
+    where: {
+      id: orgId
     },
-    data:{
+    data: {
       name,
     },
-    select:{
+    select: {
       id: true,
       name: true,
       createdById: true,
@@ -282,7 +303,7 @@ const updateOrganization = asyncHandler(async(req,res) => {
 
 });
 
-const deleteOrganization = asyncHandler(async(req,res) => {
+const deleteOrganization = asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   const { orgId } = req.params;
 
@@ -294,39 +315,39 @@ const deleteOrganization = asyncHandler(async(req,res) => {
   }
 
   const membership = await prisma.organizationMember.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId,
-        },
+    where: {
+      organizationId_userId: {
+        organizationId: orgId,
+        userId,
       },
-      select:{
-        role:true,
-      },
-    });
+    },
+    select: {
+      role: true,
+    },
+  });
 
-    if(!membership){
-      throw new ApiError(statusType.FORBIDDEN,"You are not a member of this organization.") 
-    }
-    if (membership.role !== "owner") {
-      throw new ApiError(statusType.FORBIDDEN,"Only the organization owner can update it.") 
-    }
-    await prisma.organization.delete({
-      where: {
-        id: orgId,
-      },
-    });
-    return sendResponse(
-      res,
-      "success",
-      null,
-      "Organization deleted successfully.",
-      statusType.OK
-    );
+  if (!membership) {
+    throw new ApiError(statusType.FORBIDDEN, "You are not a member of this organization.")
+  }
+  if (membership.role !== "owner") {
+    throw new ApiError(statusType.FORBIDDEN, "Only the organization owner can update it.")
+  }
+  await prisma.organization.delete({
+    where: {
+      id: orgId,
+    },
+  });
+  return sendResponse(
+    res,
+    "success",
+    null,
+    "Organization deleted successfully.",
+    statusType.OK
+  );
 
 });
 
-const getOrganizationMembers = asyncHandler(async(req,res) => {
+const getOrganizationMembers = asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   const { orgId } = req.params;
 
@@ -338,52 +359,52 @@ const getOrganizationMembers = asyncHandler(async(req,res) => {
   }
 
   const requester = await prisma.organizationMember.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId,
-        },
+    where: {
+      organizationId_userId: {
+        organizationId: orgId,
+        userId,
       },
-    });
+    },
+  });
 
-  if(!requester){
-    throw new ApiError(statusType.FORBIDDEN,"You are not a member of this organization.") 
+  if (!requester) {
+    throw new ApiError(statusType.FORBIDDEN, "You are not a member of this organization.")
   }
 
   const members = await prisma.organizationMember.findMany({
-      where: {
-        organizationId: orgId,
-      },
+    where: {
+      organizationId: orgId,
+    },
 
-      orderBy: {
-        joinedAt: "asc",
-      },
+    orderBy: {
+      joinedAt: "asc",
+    },
 
-      select: {
-        id: true,
-        userId: true,
-        role: true,
-        joinedAt: true,
+    select: {
+      id: true,
+      userId: true,
+      role: true,
+      joinedAt: true,
 
-        user: {
-          select: {
-            name: true,
-            email: true,
-          },
+      user: {
+        select: {
+          name: true,
+          email: true,
         },
       },
-    });
+    },
+  });
 
-    return sendResponse(
-      res,
-      "success",
-      members,
-      "Organization members fetched successfully.",
-      statusType.OK
-    );
+  return sendResponse(
+    res,
+    "success",
+    members,
+    "Organization members fetched successfully.",
+    statusType.OK
+  );
 })
 
-const addOrganizationMember = asyncHandler(async(req,res) => {
+const addOrganizationMember = asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   const { orgId } = req.params;
   const { email, role = "member" } = req.body;
@@ -398,37 +419,37 @@ const addOrganizationMember = asyncHandler(async(req,res) => {
     throw new ApiError(statusType.BAD_REQUEST, "User email is required.");
   }
 
-  if(!["owner","admin","member"].includes(role)){
-    throw new ApiError(statusType.BAD_REQUEST,"Invalid member role.") 
+  if (!["owner", "admin", "member"].includes(role)) {
+    throw new ApiError(statusType.BAD_REQUEST, "Invalid member role.")
   }
 
   const requester = await prisma.organizationMember.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId,
-        },
+    where: {
+      organizationId_userId: {
+        organizationId: orgId,
+        userId,
       },
-      select:{
-        role:true
-      }
-    });
+    },
+    select: {
+      role: true
+    }
+  });
 
-  if(!requester){
-    throw new ApiError(statusType.FORBIDDEN,"You are not a member of this organization.") 
+  if (!requester) {
+    throw new ApiError(statusType.FORBIDDEN, "You are not a member of this organization.")
   }
   if (requester.role !== "owner") {
-    throw new ApiError(statusType.FORBIDDEN,"Only the organization owner can add it.") 
+    throw new ApiError(statusType.FORBIDDEN, "Only the organization owner can add it.")
   }
 
   const user = await prisma.user.findUnique({
-    where:{
-      email:email.toLowerCase().trim(),
+    where: {
+      email: email.toLowerCase().trim(),
     },
-    select:{
-      id:true,
-      name:true,
-      email:true,
+    select: {
+      id: true,
+      name: true,
+      email: true,
     },
   });
 
@@ -437,55 +458,58 @@ const addOrganizationMember = asyncHandler(async(req,res) => {
   }
 
   const existingMember = await prisma.organizationMember.findUnique({
-    where:{
-      organizationId_userId:{
-        organizationId:orgId,
-        userId:user.id
+    where: {
+      organizationId_userId: {
+        organizationId: orgId,
+        userId: user.id
       },
     },
   });
   if (existingMember) {
     throw new ApiError(statusType.CONFLICT, "User is already a member of this organization.");
   }
-  
+
   const member = await prisma.organizationMember.create({
-      data: {
-        organizationId: orgId,
-        userId: user.id,
-        role,
-      },
+    data: {
+      organizationId: orgId,
+      userId: user.id,
+      role,
+    },
 
-      select: {
-        id: true,
-        userId: true,
-        role: true,
-        joinedAt: true,
+    select: {
+      id: true,
+      userId: true,
+      role: true,
+      joinedAt: true,
 
-        user: {
-          select: {
-            name: true,
-            email: true,
-          },
+      user: {
+        select: {
+          name: true,
+          email: true,
         },
       },
-    });
+    },
+  });
 
-    return sendResponse(
-      res,
-      "success",
-      member,
-      "Member added successfully.",
-      statusType.OK
-    );
+  return sendResponse(
+    res,
+    "success",
+    member,
+    "Member added successfully.",
+    statusType.OK
+  );
 
 })
 
-const sendOrgInvitationEmail = asyncHandler(async(req,res) => {
+const sendOrgInvitationEmail = asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   const { orgId } = req.params;
 
-  const email = req.body.email?.trim().toLowerCase();
-  const role = req.body.role || "member";
+  const email = typeof req.body?.email === "string"
+    ? req.body.email.trim().toLowerCase()
+    : "";
+  const requestedRole = req.body?.role ?? "member";
+  const role = typeof requestedRole === "string" ? requestedRole.toLowerCase() : "";
 
   if (!userId) {
     throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized");
@@ -497,102 +521,109 @@ const sendOrgInvitationEmail = asyncHandler(async(req,res) => {
     throw new ApiError(statusType.BAD_REQUEST, "User email is required.");
   }
 
-  if(!["owner","admin","member"].includes(role)){
-    throw new ApiError(statusType.BAD_REQUEST,"Invalid member role.") 
+  if (!["owner", "admin", "member"].includes(role)) {
+    throw new ApiError(statusType.BAD_REQUEST, "Invalid member role.")
   }
 
   const requester = await prisma.organizationMember.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId,
-        },
+    where: {
+      organizationId_userId: {
+        organizationId: orgId,
+        userId,
       },
-      select:{
-        role:true
-      }
-    });
+    },
+    select: {
+      role: true
+    }
+  });
 
-  if(!requester){
-    throw new ApiError(statusType.FORBIDDEN,"You are not a member of this organization.") 
+  if (!requester) {
+    throw new ApiError(statusType.FORBIDDEN, "You are not a member of this organization.")
   }
   if (requester.role !== "owner") {
-    throw new ApiError(statusType.FORBIDDEN,"Only the organization owner can add it.") 
+    throw new ApiError(statusType.FORBIDDEN, "Only the organization owner can add it.")
+  }
+
+  if (!/^\S+@\S+\.\S+$/.test(email)) {
+    throw new ApiError(statusType.BAD_REQUEST, "Enter a valid email address.");
   }
 
   const user = await prisma.user.findUnique({
-    where:{
-      email:email.toLowerCase().trim(),
-    },
-    select:{
-      id:true,
-      name:true,
-      email:true,
-    },
+    where: { email },
+    select: { id: true, name: true, email: true },
   });
 
-  if (!user) {
-    throw new ApiError(statusType.NOT_FOUND, "User not found.");
-  }
-
-  const existingMember = await prisma.organizationMember.findUnique({
-    where:{
-      organizationId_userId:{
-        organizationId:orgId,
-        userId:user.id
+  if (user) {
+    const existingMember = await prisma.organizationMember.findUnique({
+      where: {
+        organizationId_userId: { organizationId: orgId, userId: user.id },
       },
-    },
-  });
-  if (existingMember) {
-    throw new ApiError(statusType.CONFLICT, "User is already a member of this organization.");
+    });
+    if (existingMember) {
+      throw new ApiError(statusType.CONFLICT, "User is already a member of this organization.");
+    }
   }
 
   const existingInvitation = await prisma.organizationInvitation.findFirst({
-      where: {
-        organizationId:orgId,
-        email,
-        status: "pending",
-      },
-    });
+    where: {
+      organizationId: orgId,
+      email,
+      status: "pending",
+    },
+  });
 
-    if (existingInvitation) {
+  if (existingInvitation) {
+    if (existingInvitation.expiresAt > new Date()) {
       throw new ApiError(statusType.CONFLICT, "Invitation already sent.");
     }
 
-    const token = crypto.randomBytes(32).toString("hex");
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
-
-    const invitation = await prisma.organizationInvitation.create({
-      data: {
-        organizationId:orgId,
-        email,
-        invitedById: userId,
-        role,
-        token,
-        expiresAt,
-      },
-
-      include: {
-        organization: true,
-        invitedBy: true,
-      },
+    await prisma.organizationInvitation.update({
+      where: { id: existingInvitation.id },
+      data: { status: "expired" },
     });
+  }
 
+  const token = crypto.randomBytes(32).toString("hex");
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 7);
+
+  const invitation = await prisma.organizationInvitation.create({
+    data: {
+      organizationId: orgId,
+      email,
+      invitedById: userId,
+      role,
+      token,
+      expiresAt,
+    },
+
+    select: {
+      id: true,
+      organization: { select: { name: true } },
+      invitedBy: { select: { name: true } },
+    },
+  });
+
+  try {
     await sendEmail({
       email,
       orgName: invitation.organization.name,
       inviterName: invitation.invitedBy.name,
       token,
     });
+  } catch (error) {
+    await prisma.organizationInvitation.delete({ where: { id: invitation.id } });
+    console.error("Organization invitation email failed:", error);
+    throw new ApiError(statusType.INTERNAL_SERVER_ERROR, "Could not send the invitation email. Please try again.");
+  }
 
-    return sendResponse(
-      res,
-      "success",
-      null,
-      "Invitation sent successfully",
-      statusType.OK
-    );
+  return sendResponse(
+    res,
+    "success",
+    null,
+    "Invitation sent successfully",
+    statusType.OK
+  );
 })
 
 const acceptInvitation = asyncHandler(async (req, res) => {
@@ -627,8 +658,8 @@ const acceptInvitation = asyncHandler(async (req, res) => {
   }
 
   if (invitation.expiresAt <= new Date()) {
-    await prisma.organizationInvitation.update({
-      where: { id: invitation.id },
+    await prisma.organizationInvitation.updateMany({
+      where: { id: invitation.id, status: "pending" },
       data: { status: "expired" },
     });
     throw new ApiError(statusType.GONE, "Invitation has expired.");
@@ -661,22 +692,9 @@ const acceptInvitation = asyncHandler(async (req, res) => {
     },
   });
 
-  if (existing) {
-    await prisma.organizationInvitation.update({
-      where: { id: invitation.id },
-      data: { status: "accepted" },
-    });
-
-    return sendResponse(
-      res, "success", null,
-      "You are already a member of this organization.",
-      statusType.OK
-    );
-  }
-
   await prisma.$transaction(async (tx) => {
     const updated = await tx.organizationInvitation.updateMany({
-      where: { id: invitation.id, status: "pending" },
+      where: { id: invitation.id, status: "pending", expiresAt: { gt: new Date() } },
       data: { status: "accepted" },
     });
 
@@ -684,18 +702,20 @@ const acceptInvitation = asyncHandler(async (req, res) => {
       throw new ApiError(statusType.CONFLICT, "Invitation already used.");
     }
 
-    await tx.organizationMember.create({
-      data: {
-        organizationId: invitation.organizationId,
-        userId: user.id,
-        role: invitation.role,
-      },
-    });
+    if (!existing) {
+      await tx.organizationMember.create({
+        data: {
+          organizationId: invitation.organizationId,
+          userId: user.id,
+          role: invitation.role,
+        },
+      });
+    }
   });
 
   return sendResponse(
-    res, "success", null,
-    "Invitation accepted successfully.",
+    res, "success", { organizationId: invitation.organizationId },
+    existing ? "You are already a member of this organization." : "Invitation accepted successfully.",
     statusType.OK
   );
 });
@@ -738,7 +758,7 @@ const getInvitationDetails = asyncHandler(async (req, res) => {
   );
 });
 
-const updateOrganizationMemberRole = asyncHandler(async(req,res) => {
+const updateOrganizationMemberRole = asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   const { orgId, memberUserId } = req.params;
   const { role } = req.body;
@@ -753,86 +773,86 @@ const updateOrganizationMemberRole = asyncHandler(async(req,res) => {
     throw new ApiError(statusType.BAD_REQUEST, "Member UserId is required.");
   }
 
-  if(!["owner","admin","member"].includes(role)){
-    throw new ApiError(statusType.BAD_REQUEST,"Invalid role.") 
+  if (!["owner", "admin", "member"].includes(role)) {
+    throw new ApiError(statusType.BAD_REQUEST, "Invalid role.")
   }
   const requester = await prisma.organizationMember.findUnique({
+    where: {
+      organizationId_userId: {
+        organizationId: orgId,
+        userId,
+      },
+    },
+  });
+
+  if (!requester || requester.role !== "owner") {
+    throw new ApiError(statusType.FORBIDDEN, "Only the organization owner can change member roles.");
+  }
+  const targetMember = await prisma.organizationMember.findUnique({
+    where: {
+      organizationId_userId: {
+        organizationId: orgId,
+        userId: memberUserId,
+      },
+    },
+  });
+
+  if (!targetMember) {
+    throw new ApiError(statusType.NOT_FOUND, "Organization member not found.");
+  }
+
+  if (
+    targetMember.role === "owner" &&
+    role === "member"
+  ) {
+    const ownerCount = await prisma.organizationMember.count({
       where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId,
-        },
+        organizationId: orgId,
+        role: "owner",
       },
     });
 
-    if (!requester || requester.role !== "owner") {
-      throw new ApiError(statusType.FORBIDDEN, "Only the organization owner can change member roles.");
+    if (ownerCount <= 1) {
+      throw new ApiError(statusType.BAD_REQUEST, "Organization must have at least one owner.");
     }
-    const targetMember = await prisma.organizationMember.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: memberUserId,
+  }
+
+  const updatedMember = await prisma.organizationMember.update({
+    where: {
+      organizationId_userId: {
+        organizationId: orgId,
+        userId: memberUserId,
+      },
+    },
+
+    data: {
+      role,
+    },
+
+    select: {
+      id: true,
+      userId: true,
+      role: true,
+      joinedAt: true,
+
+      user: {
+        select: {
+          name: true,
+          email: true,
         },
       },
-    });
-
-    if (!targetMember) {
-      throw new ApiError(statusType.NOT_FOUND, "Organization member not found.");
-    }
-
-    if (
-      targetMember.role === "owner" &&
-      role === "member"
-    ) {
-      const ownerCount = await prisma.organizationMember.count({
-        where: {
-          organizationId: orgId,
-          role: "owner",
-        },
-      });
-
-      if (ownerCount <= 1) {
-              throw new ApiError(statusType.BAD_REQUEST, "Organization must have at least one owner.");
-      }
-    }
-
-    const updatedMember = await prisma.organizationMember.update({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: memberUserId,
-        },
-      },
-
-      data: {
-        role,
-      },
-
-      select: {
-        id: true,
-        userId: true,
-        role: true,
-        joinedAt: true,
-
-        user: {
-          select: {
-            name: true,
-            email: true,
-          },
-        },
-      },
-    });
-    return sendResponse(
-      res,
-      "success",
-      updatedMember,
-      "Member role updated successfully.",
-      statusType.OK
-    );
+    },
+  });
+  return sendResponse(
+    res,
+    "success",
+    updatedMember,
+    "Member role updated successfully.",
+    statusType.OK
+  );
 });
 
-const removeOrganizationMember =asyncHandler(async(req,res) => {
+const removeOrganizationMember = asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   const { orgId, memberUserId } = req.params;
 
@@ -846,71 +866,130 @@ const removeOrganizationMember =asyncHandler(async(req,res) => {
     throw new ApiError(statusType.BAD_REQUEST, "Member UserId is required.");
   }
   const requester = await prisma.organizationMember.findUnique({
+    where: {
+      organizationId_userId: {
+        organizationId: orgId,
+        userId,
+      },
+    },
+  });
+
+  if (!requester || requester.role !== "owner") {
+    throw new ApiError(statusType.FORBIDDEN, "Only the organization owner can change member roles.");
+  }
+  const targetMember = await prisma.organizationMember.findUnique({
+    where: {
+      organizationId_userId: {
+        organizationId: orgId,
+        userId: memberUserId,
+      },
+    },
+  });
+
+  if (!targetMember) {
+    throw new ApiError(statusType.NOT_FOUND, "Organization member not found.");
+  }
+
+  if (targetMember.role === "owner") {
+    const ownerCount = await prisma.organizationMember.count({
       where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId,
-        },
+        organizationId: orgId,
+        role: "owner",
       },
     });
 
-    if (!requester || requester.role !== "owner") {
-      throw new ApiError(statusType.FORBIDDEN, "Only the organization owner can change member roles.");
+    if (ownerCount <= 1) {
+      throw new ApiError(statusType.BAD_REQUEST, "The last owner cannot be removed.");
     }
-    const targetMember = await prisma.organizationMember.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: memberUserId,
-        },
+  }
+  await prisma.organizationMember.delete({
+    where: {
+      organizationId_userId: {
+        organizationId: orgId,
+        userId: memberUserId,
       },
-    });
+    },
+  });
 
-    if (!targetMember) {
-      throw new ApiError(statusType.NOT_FOUND, "Organization member not found.");
-    }
+  return sendResponse(
+    res,
+    "success",
+    null,
+    "Member removed successfully.",
+    statusType.OK
+  );
+})
 
-    if (targetMember.role === "owner") {
-      const ownerCount = await prisma.organizationMember.count({
-        where: {
-          organizationId: orgId,
-          role: "owner",
-        },
-      });
+const getOrganizationAccounts = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { orgId } = req.params;
 
-      if (ownerCount <= 1) {
-        throw new ApiError(statusType.BAD_REQUEST, "The last owner cannot be removed.");
-      }
-    }
-    await prisma.organizationMember.delete({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId: memberUserId,
-        },
+  if (!userId) {
+    throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized");
+  }
+  if (!orgId) {
+    throw new ApiError(statusType.BAD_REQUEST, "Organization ID is required.");
+  }
+
+  const requester = await prisma.organizationMember.findUnique({
+    where: {
+      organizationId_userId: {
+        organizationId: orgId,
+        userId,
       },
-    });
+    },
+    select: {
+      role: true
+    }
+  });
 
-    return sendResponse(
-      res,
-      "success",
-      null,
-      "Member removed successfully.",
-      statusType.OK
-    );
+  if (!requester) {
+    throw new ApiError(statusType.FORBIDDEN, "You are not a member of this organization.")
+  }
+  if (requester.role !== "owner") {
+    throw new ApiError(statusType.FORBIDDEN, "Only the organization owner can add it.")
+  }
+
+  const accounts = await prisma.account.findMany({
+    where: {
+      organizationId: orgId,
+    },
+
+    select: {
+      id: true,
+      name: true,
+      organizationId: true,
+      teamId: true,
+      accountType: true,
+      createdAt: true
+    },
+  });
+
+  return sendResponse(
+    res,
+    "success",
+    accounts,
+    "Organization accounts fetched successfully.",
+    statusType.OK
+  );
 })
 
 export {
   createOrg,
   getAllOrgs,
   getOrganization,
+
   updateOrganization,
   deleteOrganization,
+
   getOrganizationMembers,
   addOrganizationMember,
   updateOrganizationMemberRole,
   removeOrganizationMember,
+
   sendOrgInvitationEmail,
   acceptInvitation,
-  getInvitationDetails
+  getInvitationDetails,
+
+  getOrganizationAccounts
 };

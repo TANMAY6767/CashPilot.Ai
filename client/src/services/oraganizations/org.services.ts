@@ -31,6 +31,15 @@ export interface OrgTeam {
   _count: { members: number; transactions: number };
 }
 
+export interface OrgAccounts {
+  id: string;
+  name: string;
+  accountType: string;
+  createdAt: string;
+  organizationId: string;
+  teamId: string | null;
+}
+
 export interface OrganizationDetail {
   id: string;
   name: string;
@@ -40,6 +49,7 @@ export interface OrganizationDetail {
   createdBy: { id: string; name: string; email: string };
   members: OrgMember[];
   teams: OrgTeam[];
+  accounts: OrgAccounts[]
 }
 
 // ---- List response ----

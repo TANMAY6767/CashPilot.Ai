@@ -11,6 +11,7 @@ import budgetRoutes from "./routes/budget.routes.js"
 import ledgerRoutes from "./routes/ledger.routes.js"
 import transactionRoutes from "./routes/transaction.routes.js"
 import auditLogsRoutes from "./routes/auditLogs.routes.js"
+import { ApiError } from "./utils/ApiError.js";
 dotenv.config();
 const PORT = process.env.PORT || 3000;
 const app = express();
@@ -35,6 +36,28 @@ app.use("/teams", budgetRoutes);
 app.use("/teams", ledgerRoutes);
 app.use("/teams", transactionRoutes);
 app.use("/audit-logs", auditLogsRoutes);
+
+app.use((error, req, res, next) => {
+    if (res.headersSent) return next(error);
+
+    const statusCode = error instanceof ApiError
+        ? error.statusCode
+        : Number.isInteger(error.statusCode) ? error.statusCode : 500;
+
+    if (statusCode >= 500) {
+        console.error(error);
+    }
+
+    res.status(statusCode).json({
+        status: "error",
+        data: null,
+        message: error instanceof ApiError
+            ? error.message
+            : "Something went wrong. Please try again.",
+        statusCode,
+        apiVersion: "No Version",
+    });
+});
 
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
