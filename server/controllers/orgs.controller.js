@@ -7,7 +7,35 @@ import crypto from "crypto";
 
 const getUserId = (req) => req.user?.sub;
 
+const parseAmount = (value) => {
+  if (value === undefined || value === null) {
+    return null;
+  }
 
+  const amount = String(value).trim();
+
+  // Only positive/zero numbers with max 2 decimal places
+  if (!/^\d+(\.\d{1,2})?$/.test(amount)) {
+    return null;
+  }
+
+  const [whole, decimal = ""] = amount.split(".");
+
+  const decimalPart = decimal.padEnd(2, "0");
+
+  return (
+    BigInt(whole) * 100n +
+    BigInt(decimalPart)
+  );
+};
+
+const normalizeAmount = (value) => {
+  const amount = String(value).trim();
+
+  const [whole, decimal = ""] = amount.split(".");
+
+  return `${whole}.${decimal.padEnd(2, "0")}`;
+};
 
 const createOrg = asyncHandler(async (req, res) => {
   const userId = getUserId(req);
@@ -29,11 +57,11 @@ const createOrg = asyncHandler(async (req, res) => {
   });
 
   if (existingOrg) {
-  throw new ApiError(
-    statusType.CONFLICT,
-    "You already have an organization with this name."
-  );
-}
+    throw new ApiError(
+      statusType.CONFLICT,
+      "You already have an organization with this name."
+    );
+  }
 
   const organization = await prisma.$transaction(async (tx) => {
     const org = await tx.organization.create({
@@ -974,6 +1002,191 @@ const getOrganizationAccounts = asyncHandler(async (req, res) => {
   );
 })
 
+const addFunds = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { orgId } = req.params;
+  const { amount, description } = req.body;
+
+  if (!userId) {
+    throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized");
+  }
+  if (!orgId) {
+    throw new ApiError(statusType.BAD_REQUEST, "Organization ID is required.");
+  }
+  const requester = await prisma.organizationMember.findUnique({
+    where: {
+      organizationId_userId: {
+        organizationId: orgId,
+        userId,
+      },
+    },
+    select: {
+      role: true
+    }
+  });
+
+  if (!requester) {
+    throw new ApiError(statusType.FORBIDDEN, "You are not a member of this organization.")
+  }
+  if (requester.role !== "owner") {
+    throw new ApiError(statusType.FORBIDDEN, "Only the organization owner can add it.")
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const cashAccount = await tx.account.findFirst({
+      where: {
+        organizationId:orgId,
+        name: "Financial Cash Account",
+        accountType: "asset",
+        teamId: null,
+      },
+    });
+
+    const capitalAccount = await tx.account.findFirst({
+      where: {
+        organizationId:orgId,
+        name: "Owner Capital Account",
+        accountType: "equity",
+        teamId: null,
+      },
+    });
+
+    if (!cashAccount || !capitalAccount) {
+      throw new ApiError(
+        statusType.INTERNAL_SERVER_ERROR,
+        "Default organization accounts not found."
+      );
+    }
+
+    const transaction = await tx.transaction.create({
+      data: {
+        organizationId:orgId,
+        teamId: null,
+        createdById: userId,
+        transactionType: "FUNDING",
+        description: description ?? "Owner funding",
+        ledgerEntries: {
+          create: [
+            {
+              accountId: cashAccount.id,
+              debit: amount,
+              credit: 0,
+            },
+            {
+              accountId: capitalAccount.id,
+              debit: 0,
+              credit: amount,
+            },
+          ],
+        },
+      },
+      include: {
+        ledgerEntries: true,
+      },
+    });
+
+    return transaction;
+  });
+
+  return sendResponse(
+    res,
+    "success",
+    result,
+    "Transaction recorded successfully.",
+    statusType.OK
+  );
+})
+
+const getFinancialCashFunds = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { orgId } = req.params;
+
+  if (!userId) {
+    throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized");
+  }
+
+  if (!orgId) {
+    throw new ApiError(
+      statusType.BAD_REQUEST,
+      "Organization ID is required."
+    );
+  }
+
+  const requester = await prisma.organizationMember.findUnique({
+    where: {
+      organizationId_userId: {
+        organizationId: orgId,
+        userId,
+      },
+    },
+    select: {
+      role: true,
+    },
+  });
+
+  
+  if (!requester) {
+    throw new ApiError(
+      statusType.FORBIDDEN,
+      "You are not a member of this organization."
+    );
+  }
+  if (requester.role !== "owner") {
+  throw new ApiError(
+    statusType.FORBIDDEN,
+    "Only the organization owner can add it."
+  );
+}
+
+
+  const cashAccount = await prisma.account.findFirst({
+    where: {
+      organizationId: orgId,
+      name: "Financial Cash Account",
+      accountType: "asset",
+      teamId: null,
+    },
+    select: {
+      id: true,
+      name: true,
+    },
+  });
+
+  if (!cashAccount) {
+    throw new ApiError(
+      statusType.NOT_FOUND,
+      "Financial Cash Account not found."
+    );
+  }
+
+
+  const totals = await prisma.ledgerEntry.aggregate({
+    where: {
+      accountId: cashAccount.id,
+    },
+    _sum: {
+      debit: true,
+      credit: true,
+    },
+  });
+
+  const balance =
+    Number(totals._sum.debit ?? 0) -
+    Number(totals._sum.credit ?? 0);
+
+  return sendResponse(
+    res,
+    "success",
+    {
+      accountId: cashAccount.id,
+      accountName: cashAccount.name,
+      balance,
+    },
+    "Financial cash balance fetched successfully.",
+    statusType.OK
+  );
+});
+
 export {
   createOrg,
   getAllOrgs,
@@ -991,5 +1204,7 @@ export {
   acceptInvitation,
   getInvitationDetails,
 
-  getOrganizationAccounts
+  getOrganizationAccounts,
+  addFunds,
+  getFinancialCashFunds
 };

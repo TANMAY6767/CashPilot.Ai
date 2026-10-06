@@ -63,6 +63,7 @@ model Organization {
   reimbursementClaims ReimbursementClaim[]
   accounts            Account[]
   invitations         OrganizationInvitation[]
+  transactions Transaction[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -246,15 +247,17 @@ model ReimbursementClaim {
 model Transaction {
   id String @id @default(uuid()) @db.Uuid
 
-  teamId String @map("team_id") @db.Uuid
-  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  organizationId String       @map("organization_id") @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  teamId String? @map("team_id") @db.Uuid
+  team   Team?   @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   createdById String? @map("created_by") @db.Uuid
   createdBy   User?   @relation("TransactionCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
-  transactionType String @map("transaction_type") @db.VarChar(30)
-
-  description String?
+  transactionType String  @map("transaction_type") @db.VarChar(30)
+  description     String?
 
   ledgerEntries LedgerEntry[]
 
@@ -262,6 +265,7 @@ model Transaction {
 
   createdAt DateTime @default(now()) @map("created_at")
 
+  @@index([organizationId])
   @@index([createdById])
   @@index([teamId], map: "idx_transactions_team")
   @@map("transactions")

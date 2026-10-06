@@ -13,7 +13,8 @@ import {
   sendOrgInvitationEmail,
   acceptInvitation,
   getInvitationDetails,
-  getOrganizationAccounts
+  getOrganizationAccounts,
+  getFinancialCashFunds,
 } from "../controllers/orgs.controller.js";
 
 import { checkAuth } from "../middleware/index.js";
@@ -78,5 +79,9 @@ router.route("/invitations/:token/accept")
 
 router.route("/:orgId/accounts")
   .get(getOrganizationAccounts);
+
+router.route("/:orgId/getfunds")
+  .get(getFinancialCashFunds);
+
 
 export default router;

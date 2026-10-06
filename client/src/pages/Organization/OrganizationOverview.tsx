@@ -1,5 +1,5 @@
-import { useState,useEffect } from "react";
-import { Link, useParams,useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Link, useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowRight,
@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { getOrg, type OrganizationDetail } from "@/services/oraganizations/org.services";
 import { sendOrganizationInvitation } from "@/services/api";
+import { useAuth } from "@/context/AuthContext";
 type Tab = "overview" | "members" | "accounts";
 
 const people = [
@@ -80,7 +81,8 @@ const teams = [
 export default function OrganizationOverview() {
   const { orgId } = useParams<{ orgId: string }>();
   const [org, setOrg] = useState<OrganizationDetail | null>(null);
-  const [members,setMembers] = useState(0);
+  const [members, setMembers] = useState(0);
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   // const [teams,setTeams] = useState(0);
@@ -89,8 +91,8 @@ export default function OrganizationOverview() {
       ? "Fieldwork Labs"
       : orgId
         ? orgId
-            .replace(/-/g, " ")
-            .replace(/\b\w/g, (x) => x.toUpperCase())
+          .replace(/-/g, " ")
+          .replace(/\b\w/g, (x) => x.toUpperCase())
         : "Northstar Studio";
 
   const [tab, setTab] = useState<Tab>("overview");
@@ -102,6 +104,11 @@ export default function OrganizationOverview() {
   const [orgRole, setOrgRole] = useState("Member");
   const [sendingInvite, setSendingInvite] = useState(false);
   const [inviteError, setInviteError] = useState('');
+  const [fundingOpen, setFundingOpen] = useState(false);
+  const [fundingAmount, setFundingAmount] = useState('');
+  const [cashBalance, setCashBalance] = useState(85320);
+  const [fundingError, setFundingError] = useState('');
+  const [fundingComplete, setFundingComplete] = useState(false);
 
   const sendInvite = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -124,7 +131,7 @@ export default function OrganizationOverview() {
       setSendingInvite(false);
     }
   };
-useEffect(() => {
+  useEffect(() => {
 
     if (!orgId) return;
 
@@ -132,8 +139,9 @@ useEffect(() => {
       try {
         setLoading(true);
         setError("");
+        setCashBalance(85320);
         const data = await getOrg(orgId);
-        console.log("babu is :- ",data);
+        console.log("babu is :- ", data);
         if (!data) {
           setError("Organization not found");
         } else {
@@ -150,14 +158,41 @@ useEffect(() => {
 
     load();
   }, [orgId]);
-   if (loading) {
+
+  const currentMembership = org?.id === orgId
+    ? org.members.find((member) => member.userId === user?.id)
+    : undefined;
+  const isOrganizationOwner = currentMembership?.role === 'owner';
+
+  const submitAddMoney = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const amount = Number(fundingAmount);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setFundingError('Enter an amount greater than zero.');
+      return;
+    }
+
+    setCashBalance((balance) => balance + amount);
+    setFundingError('');
+    setFundingComplete(true);
+  };
+
+  const closeFunding = () => {
+    setFundingOpen(false);
+    setFundingAmount('');
+    setFundingError('');
+    setFundingComplete(false);
+  };
+
+  if (loading) {
     return (
       <div className="p-6">
         <p>Loading organization...</p>
       </div>
     );
   }
-    if (error || !org) {
+  if (error || !org) {
     return (
       <div className="p-6">
         <button
@@ -193,7 +228,7 @@ useEffect(() => {
           <h1>{title}</h1>
 
           <p>
-            Created September 12, 2025 <span>•</span> You’re the owner
+            Created September 12, 2025 <span>•</span> Your role: {currentMembership?.role ?? 'member'}
           </p>
         </div>
 
@@ -204,7 +239,7 @@ useEffect(() => {
           </button>
 
           <button
-          className="button button-primary"
+            className="button button-primary"
             onClick={() => {
               setInviteOpen(true);
               setSent(false);
@@ -220,31 +255,29 @@ useEffect(() => {
       {/* Tabs */}
       <div className="tabs-row org-tabs">
         <button
-          className={`tab-button ${
-            tab === "overview" ? "tab-active" : ""
-          }`}
+          className={`tab-button ${tab === "overview" ? "tab-active" : ""
+            }`}
           onClick={() => setTab("overview")}
         >
           Overview
         </button>
 
         <button
-          className={`tab-button ${
-            tab === "members" ? "tab-active" : ""
-          }`}
+          className={`tab-button ${tab === "members" ? "tab-active" : ""
+            }`}
           onClick={() => setTab("members")}
         >
           Members <span>{org.members.length}</span>
         </button>
 
-        <button
-          className={`tab-button ${
-            tab === "accounts" ? "tab-active" : ""
-          }`}
-          onClick={() => setTab("accounts")}
-        >
-          Accounts <span>2</span>
-        </button>
+        {isOrganizationOwner && (
+          <button
+            className={`tab-button ${tab === "accounts" ? "tab-active" : ""}`}
+            onClick={() => setTab("accounts")}
+          >
+            Accounts <span>{org.accounts.filter((a) => a.name !== "Owner Capital Account").length}</span>
+          </button>
+        )}
       </div>
 
       {/* Overview Tab */}
@@ -428,25 +461,30 @@ useEffect(() => {
               </thead>
 
               <tbody>
-                {people.map((person) => (
-                  <tr key={person.email}>
+                {org.members.map((person) => (
+                  <tr key={person.user.email}>
                     <td>
                       <div className="person-cell">
                         <span
-                          className={`avatar avatar-small avatar-${person.color}`}
+                          className={`avatar avatar-small avatar-green`}
                         >
-                          {person.initials}
+                          {person.user.name
+                            .split(" ")
+                            .map((part) => part[0])
+                            .join("")
+                            .slice(0, 2)
+                            .toUpperCase()}
                         </span>
 
                         <div>
-                          <strong>{person.name}</strong>
-                          <span>{person.email}</span>
+                          <strong>{person.user.name}</strong>
+                          <span>{person.user.email}</span>
                         </div>
                       </div>
                     </td>
 
                     <td>
-                      {person.role === "Owner" ? (
+                      {person.role === "owner" ? (
                         <span className="role-pill role-owner">
                           Owner
                         </span>
@@ -461,7 +499,7 @@ useEffect(() => {
                       )}
                     </td>
 
-                    <td>{person.teams}</td>
+                    {/* <td>{person.teams}</td> */}
 
                     <td>
                       <select
@@ -502,24 +540,33 @@ useEffect(() => {
 
           <div className="account-grid">
             {org.accounts.filter((acc) => acc.name !== "Owner Capital Account").map((acc) => (
-                <AccountCard
-              icon={<Wallet size={20} />}
-              tone="mint"
-              name={acc.name}
-              type={acc.accountType}
-              amount="$85,320.00"
-              description="Available funds held by your organization. Transactions assigned to this account reduce its balance."
-            />
+              <AccountCard
+                key={acc.id}
+                icon={<Wallet size={20} />}
+                tone="mint"
+                name={acc.name}
+                type={acc.accountType}
+                amount={acc.name.toLowerCase() === 'financial cash account'
+                  ? `$${cashBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  : "$85,320.00"}
+                description="Available funds held by your organization. Transactions assigned to this account reduce its balance."
+                canAddMoney={isOrganizationOwner && acc.name.toLowerCase() === 'financial cash account'}
+                onAddMoney={() => {
+                  setFundingOpen(true);
+                  setFundingError('');
+                  setFundingComplete(false);
+                }}
+              />
             ))}
-            
+
           </div>
 
           <div className="account-hint">
             <ShieldCheck size={17} />
 
             <span>
-              These system accounts are created automatically for
-              every organization.
+              These system accounts are created automatically for every organization.
+              {!isOrganizationOwner && ' Only the organization owner can add money to the cash account.'}
             </span>
           </div>
         </>
@@ -530,6 +577,63 @@ useEffect(() => {
         <span className="status-dot" />
         Organization data is up to date
       </div>
+
+      {fundingOpen && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeFunding();
+          }}
+        >
+          <form className="modal-card" onSubmit={submitAddMoney}>
+            <div className="modal-heading">
+              <div>
+                <span className="modal-icon"><Wallet size={18} /></span>
+                <h2>Add money to cash account</h2>
+                <p>Financial cash Account · Current balance ${cashBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              </div>
+              <button type="button" className="icon-button" onClick={closeFunding} aria-label="Close">
+                <X size={19} />
+              </button>
+            </div>
+
+            {fundingComplete ? (
+              <div className="invite-success">
+                <span><Check size={20} /></span>
+                <strong>Balance preview updated</strong>
+                <small>The updated amount is shown for this session.</small>
+                <div className="modal-actions">
+                  <button type="button" className="button button-primary" onClick={closeFunding}>Done</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <label className="form-label">Amount
+                  <div className="input-with-prefix">
+                    <span>$</span>
+                    <input
+                      autoFocus
+                      required
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      value={fundingAmount}
+                      onChange={(event) => setFundingAmount(event.target.value)}
+                    />
+                  </div>
+                </label>
+                {fundingError && <p role="alert" className="text-sm text-red-600">{fundingError}</p>}
+                <div className="modal-actions">
+                  <button type="button" className="button button-secondary" onClick={closeFunding}>Cancel</button>
+                  <button type="submit" className="button button-primary"><Plus size={16} />Add money</button>
+                </div>
+              </>
+            )}
+          </form>
+        </div>
+      )}
 
       {/* Invite Modal */}
       {inviteOpen && (
@@ -745,6 +849,8 @@ function AccountCard({
   type,
   amount,
   description,
+  canAddMoney,
+  onAddMoney,
 }: {
   icon: React.ReactNode;
   tone: string;
@@ -752,6 +858,8 @@ function AccountCard({
   type: string;
   amount: string;
   description: string;
+  canAddMoney: boolean;
+  onAddMoney: () => void;
 }) {
   return (
     <article className="panel account-card">
@@ -766,6 +874,13 @@ function AccountCard({
       <strong className="account-balance">{amount}</strong>
 
       <p>{description}</p>
+
+      {canAddMoney && (
+        <button className="button button-primary" onClick={onAddMoney}>
+          <Plus size={15} />
+          Add money
+        </button>
+      )}
 
       <button className="account-link">
         View ledger
