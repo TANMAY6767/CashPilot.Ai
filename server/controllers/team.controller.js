@@ -941,6 +941,56 @@ const createReimbursementClaim = asyncHandler(
   }
 );
 
+const getTeamReimbursementClaims = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { orgId, teamId } = req.params;
+  if (!userId) throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized.");
+  if (!orgId || !teamId) throw new ApiError(statusType.BAD_REQUEST, "Organization and team IDs are required.");
+
+  const team = await prisma.team.findFirst({
+    where: { id: teamId, organizationId: orgId },
+    select: { id: true },
+  });
+  if (!team) throw new ApiError(statusType.NOT_FOUND, "Team not found.");
+
+  const [organizationMember, teamMember] = await Promise.all([
+    prisma.organizationMember.findUnique({
+      where: { organizationId_userId: { organizationId: orgId, userId } },
+      select: { role: true },
+    }),
+    prisma.teamMember.findUnique({
+      where: { teamId_userId: { teamId, userId } },
+      select: { id: true },
+    }),
+  ]);
+  if (!organizationMember || (!teamMember && organizationMember.role !== "owner")) {
+    throw new ApiError(statusType.FORBIDDEN, "You do not have access to this team's reimbursement claims.");
+  }
+
+  const claims = await prisma.reimbursementClaim.findMany({
+    where: {
+      organizationId: orgId,
+      teamId,
+      ...(organizationMember.role === "owner" ? {} : { employeeId: userId }),
+    },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      organizationId: true,
+      employeeId: true,
+      teamId: true,
+      amount: true,
+      description: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+      employee: { select: { id: true, name: true, email: true } },
+    },
+  });
+
+  return res.status(200).json({ success: true, message: "Reimbursement claims fetched successfully.", data: claims });
+});
+
 const payReimbursementClaim = asyncHandler(
   async (req, res) => {
     const userId = getUserId(req);
@@ -1463,6 +1513,7 @@ export {
   createTeamExpenseTransaction,
 
   createReimbursementClaim,
+  getTeamReimbursementClaims,
   payReimbursementClaim,
   approveReimbursementClaim,
   rejectReimbursementClaim

@@ -6,7 +6,7 @@ import { apiClient } from "@/helper/commonHelper";
 
 export type TeamRole = "owner" | "admin" | "member";
 
-/* ---------- List (GET /org/:orgId/teams) ---------- */
+/* ---------- Team list and detail ---------- */
 
 export interface TeamListItem {
   id: string;
@@ -29,7 +29,7 @@ export interface TeamListItem {
   } | null;
 }
 
-/* ---------- Detail (GET /org/:orgId/teams/:teamId) ---------- */
+/* ---------- Team detail ---------- */
 
 export interface TeamMember {
   id: string;
@@ -86,7 +86,7 @@ export interface RemainingBudget {
   remaining: number;
 }
 
-/* ---------- Create (POST /org/:orgId/teams) ---------- */
+/* ---------- Team creation ---------- */
 
 export interface CreateTeamInput {
   name: string;
@@ -105,6 +105,10 @@ export interface CreateTeamResult {
   updatedAt: string;
 }
 
+interface CreateTeamResponse {
+  data: { team: CreateTeamResult };
+}
+
 /* =========================================================
    SERVICES
    ========================================================= */
@@ -116,7 +120,7 @@ export interface CreateTeamResult {
  */
 export const getAllTeams = async (orgId: string): Promise<TeamListItem[]> => {
   const response = await apiClient.get<{ data: TeamListItem[] }>(
-    `/${encodeURIComponent(orgId)}/teams`
+    `/org/${encodeURIComponent(orgId)}/teams`
   );
   if (response.error || !response.data) throw new Error(response.error || 'Could not load teams.');
   return response.data?.data ?? [];
@@ -131,7 +135,7 @@ export const getOneTeam = async (
   teamId: string
 ): Promise<TeamDetail | null> => {
   const response = await apiClient.get<{ data: TeamDetail }>(
-    `/${encodeURIComponent(orgId)}/teams/${encodeURIComponent(teamId)}`
+    `/org/${encodeURIComponent(orgId)}/teams/${encodeURIComponent(teamId)}`
   );
   if (response.error) throw new Error(response.error);
   return response.data?.data ?? null;
@@ -145,12 +149,12 @@ export const createTeam = async (
   orgId: string,
   input: CreateTeamInput
 ): Promise<CreateTeamResult | null> => {
-  const response = await apiClient.post<{ data: CreateTeamResult }>(
-    `/${encodeURIComponent(orgId)}/teams`,
+  const response = await apiClient.post<CreateTeamResponse>(
+    `/org/${encodeURIComponent(orgId)}/teams`,
     input
   );
   if (response.error) throw new Error(response.error);
-  return response.data?.data ?? null;
+  return response.data?.data.team ?? null;
 };
 
 interface TeamEnvelope<T> {
@@ -179,7 +183,7 @@ export const updateTeam = async (
   name: string
 ): Promise<void> => {
   const response = await apiClient.patch<TeamEnvelope<unknown>>(
-    `/${encodeURIComponent(orgId)}/teams/${encodeURIComponent(teamId)}`,
+    `/org/${encodeURIComponent(orgId)}/teams/${encodeURIComponent(teamId)}`,
     { name }
   );
   assertMutationSucceeded(response, 'Could not update team.');
@@ -187,7 +191,7 @@ export const updateTeam = async (
 
 export const deleteTeam = async (orgId: string, teamId: string): Promise<void> => {
   const response = await apiClient.delete<TeamEnvelope<null>>(
-    `/${encodeURIComponent(orgId)}/teams/${encodeURIComponent(teamId)}`
+    `/org/${encodeURIComponent(orgId)}/teams/${encodeURIComponent(teamId)}`
   );
   assertMutationSucceeded(response, 'Could not delete team.');
 };

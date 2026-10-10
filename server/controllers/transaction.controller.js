@@ -6,7 +6,7 @@ import { sendEmail } from "../services/email.service.js";
 import crypto from "crypto";
 
 
-const getUserId = (req) => req.user?._id;
+const getUserId = (req) => req.user?.sub;
 
 
 /* =========================================================
@@ -324,7 +324,7 @@ const createTransaction = asyncHandler(async (req, res) => {
 const getAllTransactions = async (req, res) => {
   try {
     const userId = getUserId(req);
-    const { teamId } = req.params;
+    const { orgId, teamId } = req.params;
 
     if (!userId) {
       return res.status(401).json({
@@ -332,12 +332,18 @@ const getAllTransactions = async (req, res) => {
       });
     }
 
-    const teamMember = await getTeamMember(
-      teamId,
-      userId
-    );
+    const [team, teamMember] = await Promise.all([
+      prisma.team.findFirst({ where: { id: teamId, organizationId: orgId }, select: { organizationId: true } }),
+      getTeamMember(teamId, userId),
+    ]);
+    const organizationMembership = team
+      ? await prisma.organizationMember.findUnique({
+          where: { organizationId_userId: { organizationId: team.organizationId, userId } },
+          select: { role: true },
+        })
+      : null;
 
-    if (!teamMember) {
+    if (!team || (!teamMember && organizationMembership?.role !== "owner")) {
       return res.status(403).json({
         message: "You are not a member of this team",
       });
@@ -411,7 +417,7 @@ const getTransaction = async (req, res) => {
   try {
     const userId = getUserId(req);
 
-    const { teamId, transactionId } =
+    const { orgId, teamId, transactionId } =
       req.params;
 
     if (!userId) {
@@ -419,6 +425,9 @@ const getTransaction = async (req, res) => {
         message: "Unauthorized",
       });
     }
+
+    const team = await prisma.team.findFirst({ where: { id: teamId, organizationId: orgId }, select: { id: true } });
+    if (!team) return res.status(404).json({ message: "Team not found" });
 
     const teamMember = await getTeamMember(
       teamId,
@@ -502,13 +511,16 @@ const getTransaction = async (req, res) => {
 const getMyTransactions = async (req, res) => {
   try {
     const userId = getUserId(req);
-    const { teamId } = req.params;
+    const { orgId, teamId } = req.params;
 
     if (!userId) {
       return res.status(401).json({
         message: "Unauthorized",
       });
     }
+
+    const team = await prisma.team.findFirst({ where: { id: teamId, organizationId: orgId }, select: { id: true } });
+    if (!team) return res.status(404).json({ message: "Team not found" });
 
     const teamMember = await getTeamMember(
       teamId,

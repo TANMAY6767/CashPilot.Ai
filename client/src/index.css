@@ -506,6 +506,21 @@ to{transform:translateY(0);opacity:1}
 .team-member-actions{display:flex;align-items:center;gap:7px}
 .team-member-actions select{height:27px;max-width:92px;padding:0 5px;font-size:8px}
 .team-member-actions .edit-budget-button{font-size:8px}
+.team-claims-panel{margin-top:14px}
+.claim-status{display:inline-flex;padding:4px 7px;border-radius:12px;background:rgb(var(--bg-muted));font-size:8px;font-weight:700}
+.claim-status.status-pending{background:#fff4df;color:#a87416}
+.claim-status.status-approved{background:#e6f5ed;color:#27845c}
+.claim-status.status-rejected{background:#fdebed;color:#bd4c5b}
+.claim-status.status-paid{background:#e8efff;color:#4969b5}
+.dark .claim-status.status-pending{background:#4c4028;color:#f4d38b}
+.dark .claim-status.status-approved{background:#294638;color:#a4e9c3}
+.dark .claim-status.status-rejected{background:#4d3038;color:#ffb9c4}
+.dark .claim-status.status-paid{background:#2f3c5a;color:#b6c9ff}
+.claim-actions{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.claim-action{padding:5px 7px;border:1px solid rgb(var(--border-default));border-radius:6px;background:rgb(var(--bg-surface));color:rgb(var(--text-secondary));font-size:8px;font-weight:600}
+.claim-action:hover{border-color:rgb(var(--accent)/.35);color:rgb(var(--accent))}
+.claim-approve{color:rgb(var(--success))}
+.claim-reject{color:rgb(var(--danger))}
 
 @media(max-width:760px){
   .team-preview-role{align-self:flex-start}
@@ -528,6 +543,7 @@ to{transform:translateY(0);opacity:1}
   .team-add-member-form{flex-wrap:wrap}
   .team-add-member-form select:first-child{flex-basis:100%}
   .team-member-actions{gap:4px}
+  .team-detail-actions{flex-wrap:wrap}
 }
 
 @media(max-width:1100px){.app-content{padding:25px 25px 32px}

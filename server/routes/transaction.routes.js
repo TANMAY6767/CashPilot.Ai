@@ -1,21 +1,20 @@
 import { Router } from "express";
 import {
-  createTransaction,
   getAllTransactions,
   getMyTransactions,
   getTransaction,
 } from "../controllers/transaction.controller.js";
+import { createTeamExpenseTransaction } from "../controllers/team.controller.js";
 import { checkAuth } from "../middleware/index.js";
 
 const router = Router();
-
 router.use(checkAuth);
 
-router.route("/:teamId/transactions")
+router.route("/org/:orgId/teams/:teamId/transactions")
   .get(getAllTransactions)
-  .post(createTransaction);
+  .post(createTeamExpenseTransaction);
 
-router.get("/:teamId/transactions/mine", getMyTransactions);
-router.get("/:teamId/transactions/:transactionId", getTransaction);
+router.get("/org/:orgId/teams/:teamId/transactions/mine", getMyTransactions);
+router.get("/org/:orgId/teams/:teamId/transactions/:transactionId", getTransaction);
 
 export default router;

@@ -6,11 +6,9 @@ import cookieParser from "cookie-parser";
 import userRoutes from "./routes/user.routes.js"
 import teamRoutes from "./routes/team.routes.js"
 import orgRoutes from "./routes/organization.routes.js"
-import accountRoutes from "./routes/account.routes.js"
 import budgetRoutes from "./routes/budget.routes.js"
-import ledgerRoutes from "./routes/ledger.routes.js"
 import transactionRoutes from "./routes/transaction.routes.js"
-import auditLogsRoutes from "./routes/auditLogs.routes.js"
+import reimbursementRoutes from "./routes/reimbursement.routes.js"
 import { ApiError } from "./utils/ApiError.js";
 dotenv.config();
 const PORT = process.env.PORT || 3000;
@@ -31,11 +29,9 @@ app.get("/",(req, res) => {
 app.use("/users", userRoutes);
 app.use("/org", orgRoutes);
 app.use("/", teamRoutes);
-// app.use("/teams", accountRoutes);
 app.use("/teams", budgetRoutes);
-// app.use("/teams", ledgerRoutes);
-// app.use("/teams", transactionRoutes);
-// app.use("/audit-logs", auditLogsRoutes);
+app.use("/", transactionRoutes);
+app.use("/", reimbursementRoutes);
 
 app.use((error, req, res, next) => {
     if (res.headersSent) return next(error);
