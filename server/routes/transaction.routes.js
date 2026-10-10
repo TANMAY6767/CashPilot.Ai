@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   getAllTransactions,
+  getOrganizationActivity,
   getMyTransactions,
   getTransaction,
 } from "../controllers/transaction.controller.js";
@@ -9,6 +10,9 @@ import { checkAuth } from "../middleware/index.js";
 
 const router = Router();
 router.use(checkAuth);
+
+router.get("/org/:orgId/transactions", getOrganizationActivity);
+router.get("/org/:orgId/teams/:teamId/activity", getOrganizationActivity);
 
 router.route("/org/:orgId/teams/:teamId/transactions")
   .get(getAllTransactions)

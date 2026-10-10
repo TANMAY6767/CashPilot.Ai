@@ -407,6 +407,200 @@ const getAllTransactions = async (req, res) => {
   }
 };
 
+const getOrganizationActivity = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { orgId } = req.params;
+  if (!userId) throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized.");
+  if (!orgId || !isValidUUID(orgId)) throw new ApiError(statusType.BAD_REQUEST, "A valid organization ID is required.");
+
+  const organizationMember = await prisma.organizationMember.findUnique({
+    where: { organizationId_userId: { organizationId: orgId, userId } },
+    select: { role: true },
+  });
+  if (!organizationMember) throw new ApiError(statusType.FORBIDDEN, "You do not have access to this organization.");
+
+  const isOrganizationOwner = organizationMember.role === "owner";
+  const requestedTeamId = req.params.teamId || req.query.teamId || "";
+  if (requestedTeamId && !isValidUUID(requestedTeamId)) throw new ApiError(statusType.BAD_REQUEST, "A valid team ID is required.");
+
+  const visibleTeams = await prisma.team.findMany({
+    where: {
+      organizationId: orgId,
+      ...(requestedTeamId ? { id: requestedTeamId } : {}),
+      ...(isOrganizationOwner ? {} : { members: { some: { userId } } }),
+    },
+    select: { id: true, name: true, budget: { select: { currency: true } } },
+    orderBy: { name: "asc" },
+  });
+
+  if (requestedTeamId && !visibleTeams.some((team) => team.id === requestedTeamId)) {
+    throw new ApiError(statusType.NOT_FOUND, "Team not found or you do not have access to it.");
+  }
+
+  const teamIds = visibleTeams.map((team) => team.id);
+  const teamById = new Map(visibleTeams.map((team) => [team.id, team]));
+  const activityType = String(req.query.type || "all").toLowerCase();
+  const allowedTypes = new Set(["all", "expense", "reimbursement", "other"]);
+  if (!allowedTypes.has(activityType)) throw new ApiError(statusType.BAD_REQUEST, "type must be all, expense, reimbursement, or other.");
+
+  const status = String(req.query.status || "all").toUpperCase();
+  const allowedStatuses = new Set(["ALL", "PENDING", "APPROVED", "REJECTED", "PAID"]);
+  if (!allowedStatuses.has(status)) throw new ApiError(statusType.BAD_REQUEST, "status must be pending, approved, rejected, or paid.");
+
+  const parseDate = (value, label, endOfDay = false) => {
+    if (!value) return undefined;
+    const date = new Date(String(value));
+    if (Number.isNaN(date.getTime())) throw new ApiError(statusType.BAD_REQUEST, `${label} must be a valid date.`);
+    if (endOfDay && /^\d{4}-\d{2}-\d{2}$/.test(String(value))) date.setUTCHours(23, 59, 59, 999);
+    return date;
+  };
+  const from = parseDate(req.query.from, "from");
+  const to = parseDate(req.query.to, "to", true);
+  if (from && to && from > to) throw new ApiError(statusType.BAD_REQUEST, "from must be before or equal to to.");
+  const createdAt = from || to ? { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } : undefined;
+
+  const search = String(req.query.search || "").trim().slice(0, 120);
+  const insensitiveContains = { contains: search, mode: "insensitive" };
+  const transactionSearch = search ? {
+    OR: [
+      ...(isValidUUID(search) ? [{ id: search }] : []),
+      { description: insensitiveContains },
+      { team: { is: { name: insensitiveContains } } },
+      { createdBy: { is: { name: insensitiveContains } } },
+    ],
+  } : {};
+  const claimSearch = search ? {
+    OR: [
+      ...(isValidUUID(search) ? [{ id: search }] : []),
+      { description: insensitiveContains },
+      { team: { is: { name: insensitiveContains } } },
+      { employee: { is: { name: insensitiveContains } } },
+    ],
+  } : {};
+
+  const transactionTypeFilter = activityType === "expense"
+    ? { transactionType: "EXPENSE" }
+    : activityType === "reimbursement"
+      ? { transactionType: { startsWith: "REIMBURSEMENT" } }
+      : activityType === "other"
+        ? { AND: [{ transactionType: { not: "EXPENSE" } }, { transactionType: { not: { startsWith: "REIMBURSEMENT" } } }] }
+        : {};
+
+  const transactionWhere = {
+    organizationId: orgId,
+    teamId: { in: teamIds },
+    ...(createdAt ? { createdAt } : {}),
+    ...transactionTypeFilter,
+    ...transactionSearch,
+  };
+  const claimWhere = {
+    organizationId: orgId,
+    teamId: { in: teamIds },
+    ...(isOrganizationOwner ? {} : { employeeId: userId }),
+    ...(status !== "ALL" ? { status } : {}),
+    ...(createdAt ? { createdAt } : {}),
+    ...claimSearch,
+  };
+
+  const includeTransactions = activityType !== "reimbursement";
+  const includeClaims = activityType === "all" || activityType === "reimbursement";
+  const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
+  const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit || "50"), 10) || 50));
+  if (page > 1000) throw new ApiError(statusType.BAD_REQUEST, "page must be 1000 or less.");
+  const skip = (page - 1) * limit;
+  const fetchLimit = skip + limit;
+
+  const [transactionCount, claimCount, transactions, claims] = await Promise.all([
+    includeTransactions ? prisma.transaction.count({ where: transactionWhere }) : Promise.resolve(0),
+    includeClaims ? prisma.reimbursementClaim.count({ where: claimWhere }) : Promise.resolve(0),
+    includeTransactions ? prisma.transaction.findMany({
+      where: transactionWhere,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: fetchLimit,
+      select: {
+        id: true, organizationId: true, teamId: true, createdById: true,
+        transactionType: true, description: true, referenceId: true, createdAt: true,
+        createdBy: { select: { id: true, name: true, email: true } },
+        ledgerEntries: {
+          select: {
+            id: true, accountId: true, debit: true, credit: true, description: true,
+            account: { select: { id: true, name: true, accountType: true } },
+          },
+        },
+      },
+    }) : Promise.resolve([]),
+    includeClaims ? prisma.reimbursementClaim.findMany({
+      where: claimWhere,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: fetchLimit,
+      select: {
+        id: true, organizationId: true, employeeId: true, teamId: true, amount: true,
+        description: true, status: true, createdAt: true, updatedAt: true,
+        employee: { select: { id: true, name: true, email: true } },
+      },
+    }) : Promise.resolve([]),
+  ]);
+
+  const amountFromEntries = (entries) => {
+    const expenseEntries = entries.filter((entry) => entry.account.accountType === "expense");
+    const selectedEntries = expenseEntries.length ? expenseEntries : entries;
+    const cents = selectedEntries.reduce((total, entry) => total + (parseAmount(entry.debit) || 0n) + (expenseEntries.length ? (parseAmount(entry.credit) || 0n) : 0n), 0n);
+    return `${cents / 100n}.${String(cents % 100n).padStart(2, "0")}`;
+  };
+
+  const transactionItems = transactions.map((transaction) => {
+    const team = teamById.get(transaction.teamId);
+    return {
+      id: transaction.id,
+      recordType: "transaction",
+      organizationId: transaction.organizationId,
+      teamId: transaction.teamId,
+      team: team ? { id: team.id, name: team.name } : null,
+      transactionType: transaction.transactionType,
+      description: transaction.description,
+      referenceId: transaction.referenceId,
+      status: null,
+      amount: amountFromEntries(transaction.ledgerEntries),
+      currency: team?.budget?.currency?.trim() || "INR",
+      person: transaction.createdBy,
+      createdAt: transaction.createdAt,
+      ledgerEntries: transaction.ledgerEntries,
+    };
+  });
+  const claimItems = claims.map((claim) => {
+    const team = teamById.get(claim.teamId);
+    return {
+      id: claim.id,
+      recordType: "reimbursement_claim",
+      organizationId: claim.organizationId,
+      teamId: claim.teamId,
+      team: team ? { id: team.id, name: team.name } : null,
+      transactionType: null,
+      description: claim.description,
+      referenceId: null,
+      status: claim.status,
+      amount: claim.amount.toString(),
+      currency: team?.budget?.currency?.trim() || "INR",
+      person: claim.employee,
+      createdAt: claim.createdAt,
+      updatedAt: claim.updatedAt,
+      ledgerEntries: [],
+    };
+  });
+
+  const items = [...transactionItems, ...claimItems]
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id))
+    .slice(skip, skip + limit);
+  const total = transactionCount + claimCount;
+
+  return sendResponse(res, "success", {
+    items,
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    summary: { transactions: transactionCount, reimbursementClaims: claimCount, totalRecords: total },
+    scope: { organizationId: orgId, teamId: requestedTeamId || null, accessibleTeamCount: visibleTeams.length },
+  }, "Organization activity fetched successfully.", statusType.OK);
+});
+
 const getTransaction = async (req, res) => {
   try {
     const userId = getUserId(req);
@@ -590,6 +784,7 @@ const getMyTransactions = async (req, res) => {
 export {
   createTransaction,
   getAllTransactions,
+  getOrganizationActivity,
   getTransaction,
   getMyTransactions,
 };
