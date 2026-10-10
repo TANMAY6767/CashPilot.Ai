@@ -164,7 +164,7 @@ export default function OrganizationOverview() {
   }, [orgId, user?.id]);
 
   const currentMembership = org?.id === orgId
-    ? org.members.find((member) => member.userId === user?.id)
+    ? org?.members.find((member) => member.userId === user?.id)
     : undefined;
   const isOrganizationOwner = currentMembership?.role === 'owner';
 
@@ -366,18 +366,18 @@ export default function OrganizationOverview() {
               <div className="org-team-list">
                 {org.teams.map((team) => (
                   <div className="org-team-row" key={team.name}>
-                    <div className={`team-avatar tone-${team.tone}`}>
-                      {team.initials}
+                    <div className="team-avatar tone-violet">
+                      {team.name.trim().slice(0, 2).toUpperCase()}
                     </div>
 
                     <div className="org-team-name">
                       <strong>{team.name}</strong>
-                      <span>{team.members} members</span>
+                      <span>{team._count.members} members · {team._count.transactions} transactions</span>
                     </div>
 
                     <div className="org-team-budget">
-                      <strong>{team.budget}</strong>
-                      <span>monthly budget</span>
+                      <strong>View team</strong>
+                      <span>budget details</span>
                     </div>
 
                     <ArrowRight size={16} />

@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { ArrowRight, Plus, Search, ShieldCheck, UsersRound, WalletCards, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { getAllOrgs, getOrg, type Organization, type OrganizationDetail } from '@/services/oraganizations/org.services';
+import { getOrg, type OrganizationDetail } from '@/services/oraganizations/org.services';
 import { createTeam, createTeamBudget, deleteTeam, getAllTeams, getRemainingBudget, updateTeam, updateTeamBudget, type RemainingBudget, type TeamListItem } from '@/services/teams/teams';
+import { useOrganization } from '@/context/OrganizationContext';
 
 type ModalMode = 'create' | 'rename' | 'budget';
 const money = (amount: number | string, currency = 'INR') => new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 0 }).format(Number(amount) || 0);
@@ -11,8 +12,7 @@ const initials = (name: string) => name.split(/[\s&]+/).filter(Boolean).slice(0,
 
 export default function TeamsPage() {
   const { user } = useAuth();
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [organizationId, setOrganizationId] = useState('');
+  const { activeOrganization: organization, activeOrganizationId: organizationId, loadingOrganizations } = useOrganization();
   const [organizationDetail, setOrganizationDetail] = useState<OrganizationDetail | null>(null);
   const [teams, setTeams] = useState<TeamListItem[]>([]);
   const [remaining, setRemaining] = useState<Record<string, RemainingBudget>>({});
@@ -26,7 +26,6 @@ export default function TeamsPage() {
   const [budgetValue, setBudgetValue] = useState('');
   const [currency, setCurrency] = useState('INR');
 
-  const organization = organizations.find((item) => item.id === organizationId) ?? null;
   const isOrganizationOwner = organization?.role === 'owner';
   const visibleTeams = useMemo(() => teams.filter((team) => {
     const hasAccess = isOrganizationOwner || team.createdById === user?.id || team.members.length > 0;
@@ -45,32 +44,14 @@ export default function TeamsPage() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    const loadOrganizations = async () => {
-      try {
-        setLoading(true); setError('');
-        const result = await getAllOrgs();
-        if (cancelled) return;
-        const available = result ?? [];
-        setOrganizations(available);
-        setOrganizationId((current) => available.some((org) => org.id === current) ? current : available[0]?.id ?? '');
-      } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : 'Could not load organizations.');
-      } finally { if (!cancelled) setLoading(false); }
-    };
-    void loadOrganizations();
-    return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
-    if (!organizationId) { setTeams([]); setOrganizationDetail(null); return; }
+    if (!organizationId) { setTeams([]); setOrganizationDetail(null); setLoading(loadingOrganizations); return; }
     let cancelled = false;
     setLoading(true); setError('');
     void loadTeams(organizationId).catch((cause) => {
       if (!cancelled) setError(cause instanceof Error ? cause.message : 'Could not load teams.');
     }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [organizationId, loadTeams]);
+  }, [organizationId, loadTeams, loadingOrganizations]);
 
   const openModal = (mode: ModalMode, team: TeamListItem | null = null) => {
     setError(''); setSelectedTeam(team); setTeamName(team?.name ?? '');
@@ -119,10 +100,10 @@ export default function TeamsPage() {
   return <div className="page-wrap">
     <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> ORGANIZATION</div><h1>Teams &amp; budgets</h1><p>Organize your people and keep team spending on track.</p></div><button className="button button-primary" onClick={() => openModal('create')} disabled={!organizationId}><Plus size={16}/>Create team</button></div>
 
-    <div className="team-workspace panel"><div className="workspace-avatar">{organization ? initials(organization.name).slice(0, 1) : '?'}</div><div><span className="subtle-label">CURRENT ORGANIZATION</span>{organizations.length > 1 ? <select className="team-organization-select" aria-label="Select organization" value={organizationId} onChange={(event) => setOrganizationId(event.target.value)}>{organizations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select> : <strong>{organization?.name ?? (loading ? 'Loading organizations…' : 'No organization')}</strong>}</div><span className="team-workspace-meta">{visibleTeams.length} {visibleTeams.length === 1 ? 'team' : 'teams'} available</span></div>
+    <div className="team-workspace panel"><div className="workspace-avatar">{organization ? initials(organization.name).slice(0, 1) : '?'}</div><div><span className="subtle-label">CURRENT ORGANIZATION</span><strong>{organization?.name ?? (loading || loadingOrganizations ? 'Loading organizations…' : 'Select an organization from the workspace menu')}</strong></div><span className="team-workspace-meta">{visibleTeams.length} {visibleTeams.length === 1 ? 'team' : 'teams'} available</span></div>
 
     {error && <div className="form-note team-page-error" role="alert">{error}</div>}
-    {!loading && !organizations.length && <section className="panel team-empty-state"><span><UsersRound size={20}/></span><h2>No organizations found</h2><p>Join an organization to view or create its teams.</p></section>}
+    {!loading && !loadingOrganizations && !organization && <section className="panel team-empty-state"><span><UsersRound size={20}/></span><h2>Choose an organization</h2><p>Use the workspace menu to select an organization and view its teams.</p></section>}
 
     {organization && <>
       <div className="team-list-toolbar"><div><h2>{isOrganizationOwner ? 'All teams' : 'Your teams'} <span className="inline-count">{visibleTeams.length}</span></h2><p>{isOrganizationOwner ? 'As organization owner, you can see every team.' : 'You can see teams where you are a member or admin.'}</p></div><label className="search-field"><Search size={16}/><input aria-label="Search teams" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search teams"/></label></div>

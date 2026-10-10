@@ -1,34 +1,83 @@
-import { useMemo, useState } from 'react';
-import { ArrowDownWideNarrow, ArrowRight, Download, CircleEllipsis, Plus, ReceiptText, Search, X } from 'lucide-react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { ArrowRight, Plus, ReceiptText, Search, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { useOrganization } from '@/context/OrganizationContext';
+import { getAllTeams, type TeamListItem } from '@/services/teams/teams';
+import { createTeamExpenseTransaction, getTeamTransactions, type TeamTransaction } from '@/services/teamActivity';
 
-type Transaction = { id: string; title: string; team: string; person: string; date: string; amount: number; category: string; initials: string; tone: string };
-const seed: Transaction[] = [
-  { id: 'TX-1042', title: 'Figma annual subscription', team: 'Product & Design', person: 'Morgan Lee', date: 'Oct 5, 2026', amount: 240, category: 'Software', initials: 'ML', tone: 'lavender' },
-  { id: 'TX-1041', title: 'Client lunch — Morrow Co.', team: 'Sales', person: 'Alex Kim', date: 'Oct 5, 2026', amount: 86.5, category: 'Meals', initials: 'AK', tone: 'peach' },
-  { id: 'TX-1040', title: 'AWS cloud infrastructure', team: 'Engineering', person: 'Jordan Davis', date: 'Oct 4, 2026', amount: 1240, category: 'Infrastructure', initials: 'JD', tone: 'mint' },
-  { id: 'TX-1039', title: 'Team offsite supplies', team: 'People & Culture', person: 'Sam Chen', date: 'Oct 2, 2026', amount: 318.2, category: 'Office', initials: 'SC', tone: 'blue' },
-  { id: 'TX-1038', title: 'Google Workspace', team: 'Engineering', person: 'Jordan Davis', date: 'Oct 1, 2026', amount: 144, category: 'Software', initials: 'JD', tone: 'lavender' },
-  { id: 'TX-1037', title: 'Conference tickets', team: 'Product & Design', person: 'Morgan Lee', date: 'Sep 29, 2026', amount: 680, category: 'Travel', initials: 'ML', tone: 'peach' },
-];
-const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n);
+type Row = { item: TeamTransaction; team: TeamListItem };
+const amountOf = (item: TeamTransaction) => Number(item.ledgerEntries.find((entry) => entry.account.accountType === 'expense')?.debit ?? item.ledgerEntries[0]?.debit ?? 0);
+const money = (amount: number, currency: string) => new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount);
+const moneyByCurrency = (values: { amount: number; currency: string }[]) => {
+  const totals = values.reduce<Record<string, number>>((result, value) => { result[value.currency] = (result[value.currency] ?? 0) + value.amount; return result; }, {});
+  return Object.entries(totals).map(([currency, amount]) => money(amount, currency)).join(' · ') || money(0, 'INR');
+};
 
 export default function TransactionPage() {
-  const [items, setItems] = useState(seed);
+  const { activeOrganization, activeOrganizationId, loadingOrganizations } = useOrganization();
+  const [teams, setTeams] = useState<TeamListItem[]>([]);
+  const [rows, setRows] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
   const [search, setSearch] = useState('');
-  const [team, setTeam] = useState('All teams');
+  const [teamFilter, setTeamFilter] = useState('all');
   const [showForm, setShowForm] = useState(false);
-  const [title, setTitle] = useState('');
+  const [selectedTeam, setSelectedTeam] = useState('');
+  const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
-  const [selectedTeam, setSelectedTeam] = useState('Engineering');
-  const [category, setCategory] = useState('Software');
-  const filtered = useMemo(() => items.filter((item) => `${item.title} ${item.team} ${item.person} ${item.category}`.toLowerCase().includes(search.toLowerCase()) && (team === 'All teams' || item.team === team)), [items, search, team]);
-  const createTransaction = (event: React.FormEvent) => { event.preventDefault(); if (!title.trim() || !Number(amount)) return; const newItem: Transaction = { id: `TX-${1043 + items.length - seed.length}`, title: title.trim(), team: selectedTeam, person: 'Jordan Davis', date: 'Oct 5, 2026', amount: Number(amount), category, initials: 'JD', tone: 'mint' }; setItems([newItem, ...items]); setShowForm(false); setTitle(''); setAmount(''); };
-  const total = filtered.reduce((sum, item) => sum + item.amount, 0);
+
+  const loadTransactions = async (orgId: string) => {
+    const teamList = await getAllTeams(orgId);
+    const results = await Promise.all(teamList.map(async (team) => ({ team, transactions: await getTeamTransactions(orgId, team.id) })));
+    setTeams(teamList);
+    setRows(results.flatMap(({ team, transactions }) => transactions.map((item) => ({ item, team }))).sort((a, b) => b.item.createdAt.localeCompare(a.item.createdAt)));
+    setSelectedTeam((current) => teamList.some((team) => team.id === current) ? current : teamList[0]?.id ?? '');
+  };
+
+  useEffect(() => {
+    if (!activeOrganizationId) { setRows([]); setTeams([]); setLoading(false); return; }
+    let cancelled = false;
+    setLoading(true); setError('');
+    void loadTransactions(activeOrganizationId).catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : 'Could not load transactions.'); }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeOrganizationId]);
+
+  const filtered = useMemo(() => rows.filter(({ item, team }) => {
+    const text = `${item.description ?? ''} ${team.name} ${item.createdBy?.name ?? ''} ${item.transactionType}`.toLowerCase();
+    return text.includes(search.toLowerCase()) && (teamFilter === 'all' || team.id === teamFilter);
+  }), [rows, search, teamFilter]);
+  const total = moneyByCurrency(filtered.map(({ item, team }) => ({ amount: amountOf(item), currency: team.budget?.currency ?? 'INR' })));
+  const currency = teams.find((team) => team.id === selectedTeam)?.budget?.currency ?? 'INR';
+
+  const createTransaction = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!activeOrganizationId || !selectedTeam || saving) return;
+    const parsedAmount = Number(amount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) { setError('Enter an amount greater than zero.'); return; }
+    try {
+      setSaving(true); setError('');
+      await createTeamExpenseTransaction(activeOrganizationId, selectedTeam, { amount: parsedAmount, description: description.trim() });
+      await loadTransactions(activeOrganizationId);
+      setShowForm(false); setDescription(''); setAmount('');
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not record this transaction.'); }
+    finally { setSaving(false); }
+  };
+
+  if (loadingOrganizations) return <div className="page-wrap"><section className="panel org-home-empty"><p>Loading your workspace…</p></section></div>;
+  if (!activeOrganization) return <div className="page-wrap"><section className="panel org-home-empty"><span className="modal-icon"><ReceiptText size={19}/></span><h1>Choose an organization</h1><p>Select an organization from the workspace menu to view its transactions.</p><Link className="button button-primary" to="/">View organizations <ArrowRight size={15}/></Link></section></div>;
+
   return <div className="page-wrap">
-    <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> NORTHSTAR STUDIO</div><h1>Transactions</h1><p>Review and manage spending across all your teams.</p></div><div className="heading-actions"><button className="button button-secondary"><Download size={16}/>Export</button><button className="button button-primary" onClick={() => setShowForm(true)}><Plus size={17}/>Record transaction</button></div></div>
-    <div className="transaction-stats"><div className="panel transaction-stat"><span className="metric-icon"><ReceiptText size={18}/></span><span className="subtle-label">TOTAL SPEND THIS MONTH</span><strong>$42,680.00</strong><small><span className="change-warn">↑ 12.8%</span> compared to last month</small></div><div className="panel transaction-stat"><span className="metric-icon"><ArrowDownWideNarrow size={18}/></span><span className="subtle-label">TRANSACTIONS THIS MONTH</span><strong>126</strong><small>Across 8 teams</small></div><div className="panel transaction-stat"><span className="metric-icon"><ReceiptText size={18}/></span><span className="subtle-label">AVERAGE TRANSACTION</span><strong>$338.73</strong><small>Across all categories</small></div></div>
-    <section className="panel transactions-panel ledger-panel"><div className="ledger-toolbar"><div><h2>All transactions</h2><p>Showing {filtered.length} of {items.length} transactions <span>·</span> {fmt(total)} total</p></div><div className="ledger-controls"><label className="search-field"><Search size={16}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search transactions"/></label><select className="filter-select" value={team} onChange={(event) => setTeam(event.target.value)}><option>All teams</option>{['Engineering', 'Product & Design', 'Sales', 'People & Culture'].map((option) => <option key={option}>{option}</option>)}</select><button className="button button-secondary filter-date">October 2026 <span>⌄</span></button></div></div><div className="table-scroll"><table className="data-table transaction-table"><thead><tr><th>TRANSACTION</th><th>TEAM</th><th>PAID BY</th><th>DATE</th><th>CATEGORY</th><th className="align-right">AMOUNT</th><th/></tr></thead><tbody>{filtered.map((item) => <tr key={item.id}><td><div className="transaction-title"><span className={`merchant-icon ${item.tone}`}><ReceiptText size={16}/></span><span className="transaction-copy"><strong>{item.title}</strong><small>{item.id}</small></span></div></td><td>{item.team}</td><td><div className="paid-by"><span className="avatar avatar-tiny avatar-indigo">{item.initials}</span>{item.person}</div></td><td>{item.date}</td><td><span className="category-pill">{item.category}</span></td><td className="align-right amount-cell">−{fmt(item.amount)}</td><td><button className="icon-button row-more"><CircleEllipsis size={18}/></button></td></tr>)}</tbody></table>{filtered.length === 0 && <div className="empty-state"><span><Search size={20}/></span><strong>No transactions found</strong><p>Try a different search or team filter.</p></div>}</div><div className="table-pagination"><span>Showing <strong>{filtered.length ? 1 : 0}–{filtered.length}</strong> of <strong>{filtered.length}</strong> results</span><div><button className="button button-secondary" disabled>Previous</button><button className="button button-secondary" disabled>Next <ArrowRight size={14}/></button></div></div></section>
-    <div className="bottom-note"><span className="status-dot"/> All transactions are up to date</div>
-    {showForm && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowForm(false); }}><form className="modal-card" onSubmit={createTransaction}><div className="modal-heading"><div><span className="modal-icon"><ReceiptText size={18}/></span><h2>Record a transaction</h2><p>Add an expense to a team's budget.</p></div><button type="button" className="icon-button" onClick={() => setShowForm(false)} aria-label="Close"><X size={19}/></button></div><label className="form-label">What was this for?<input autoFocus required value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Design software subscription"/></label><div className="form-two-col"><label className="form-label">Amount<div className="input-with-prefix"><span>$</span><input required min="0.01" step="0.01" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00"/></div></label><label className="form-label">Category<select value={category} onChange={(event) => setCategory(event.target.value)}>{['Software', 'Meals', 'Travel', 'Office', 'Infrastructure', 'Other'].map((x) => <option key={x}>{x}</option>)}</select></label></div><label className="form-label">Team<select value={selectedTeam} onChange={(event) => setSelectedTeam(event.target.value)}>{['Engineering', 'Product & Design', 'Sales', 'People & Culture', 'Operations'].map((x) => <option key={x}>{x}</option>)}</select></label><label className="form-label">Description<input placeholder="Optional notes"/></label><div className="form-note"><ReceiptText size={16}/> This expense will be deducted from the selected team's budget.</div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setShowForm(false)}>Cancel</button><button type="submit" className="button button-primary"><Plus size={16}/>Save transaction</button></div></form></div>}
+    <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> {activeOrganization.name}</div><h1>Transactions</h1><p>Review spending recorded by this organization's teams.</p></div><button className="button button-primary" onClick={() => { setError(''); setShowForm(true); }} disabled={!teams.length}><Plus size={17}/>Record expense</button></div>
+    {error && <div className="form-note" role="alert">{error}</div>}
+    <div className="transaction-stats"><div className="panel transaction-stat"><span className="metric-icon"><ReceiptText size={18}/></span><span className="subtle-label">VISIBLE SPEND</span><strong>{total}</strong><small>Across {teamFilter === 'all' ? 'all teams' : 'the selected team'}</small></div><div className="panel transaction-stat"><span className="metric-icon"><ReceiptText size={18}/></span><span className="subtle-label">TRANSACTIONS</span><strong>{filtered.length}</strong><small>In {activeOrganization.name}</small></div><div className="panel transaction-stat"><span className="metric-icon"><ReceiptText size={18}/></span><span className="subtle-label">TEAMS</span><strong>{teamFilter === 'all' ? teams.length : 1}</strong><small>Available in this organization</small></div></div>
+    <section className="panel transactions-panel ledger-panel"><div className="ledger-toolbar"><div><h2>Organization transactions</h2><p>{loading ? 'Loading activity…' : `Showing ${filtered.length} ${filtered.length === 1 ? 'transaction' : 'transactions'} · ${total}`}</p></div><div className="ledger-controls"><label className="search-field"><Search size={16}/><input aria-label="Search transactions" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search transactions"/></label><select className="filter-select" aria-label="Filter by team" value={teamFilter} onChange={(event) => setTeamFilter(event.target.value)}><option value="all">All teams</option>{teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></div></div>
+      <div className="table-scroll"><table className="data-table transaction-table"><thead><tr><th>TRANSACTION</th><th>TEAM</th><th>RECORDED BY</th><th>DATE</th><th>TYPE</th><th className="align-right">AMOUNT</th></tr></thead><tbody>{filtered.map(({ item, team }) => { const itemCurrency = team.budget?.currency ?? currency; return <tr key={item.id}><td><div className="transaction-title"><span className="merchant-icon lavender"><ReceiptText size={16}/></span><span className="transaction-copy"><strong>{item.description || 'Team transaction'}</strong><small>{item.id}</small></span></div></td><td>{team.name}</td><td>{item.createdBy?.name ?? '—'}</td><td>{new Date(item.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</td><td><span className="category-pill">{item.transactionType.replace(/_/g, ' ')}</span></td><td className="align-right amount-cell">{item.transactionType === 'REIMBURSEMENT_REJECTION_REVERSAL' ? '+' : '−'}{money(amountOf(item), itemCurrency)}</td></tr>; })}</tbody></table>
+        {!loading && filtered.length === 0 && <div className="empty-state"><span><Search size={20}/></span><strong>{rows.length ? 'No transactions found' : 'No transactions yet'}</strong><p>{rows.length ? 'Try a different search or team.' : `Expenses recorded by ${activeOrganization.name} teams will appear here.`}</p></div>}
+      </div><div className="table-pagination"><span>Showing <strong>{filtered.length}</strong> of <strong>{rows.length}</strong> organization transactions</span><span className="transaction-scope-note">Only {activeOrganization.name} is included</span></div></section>
+    {showForm && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setShowForm(false); }}><form className="modal-card" onSubmit={(event) => void createTransaction(event)}><div className="modal-heading"><div><span className="modal-icon"><ReceiptText size={18}/></span><h2>Record a team expense</h2><p>This expense will be recorded in {activeOrganization.name}.</p></div><button type="button" className="icon-button" onClick={() => setShowForm(false)} aria-label="Close" disabled={saving}><X size={19}/></button></div>
+      <label className="form-label">Team<select required value={selectedTeam} onChange={(event) => setSelectedTeam(event.target.value)}>{teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
+      <div className="form-two-col"><label className="form-label">Amount<div className="input-with-prefix"><span>{currency}</span><input required min="0.01" step="0.01" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00"/></div></label><label className="form-label">Description<input required maxLength={240} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What was this expense for?"/></label></div>
+      {error && <div className="form-note" role="alert">{error}</div>}<div className="form-note"><ReceiptText size={16}/> The expense will be deducted from the selected team's budget.</div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setShowForm(false)} disabled={saving}>Cancel</button><button type="submit" className="button button-primary" disabled={saving || !teams.length}><Plus size={16}/>{saving ? 'Saving…' : 'Save expense'}</button></div></form></div>}
   </div>;
 }

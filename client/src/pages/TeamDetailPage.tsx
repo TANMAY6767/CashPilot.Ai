@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { ArrowLeft, CalendarDays, Check, CircleDollarSign, Plus, ReceiptText, ShieldCheck, UsersRound, WalletCards } from 'lucide-react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { getAllOrgs, getOrg, type Organization, type OrganizationDetail } from '@/services/oraganizations/org.services';
+import { getOrg, type OrganizationDetail } from '@/services/oraganizations/org.services';
 import { addTeamMember, getAllTeams, getOneTeam, getRemainingBudget, removeTeamMember, updateTeamMemberRole, type RemainingBudget, type TeamDetail, type TeamListItem } from '@/services/teams/teams';
 import { approveReimbursementClaim, createReimbursementClaim, createTeamExpenseTransaction, getTeamReimbursementClaims, getTeamTransactions, payReimbursementClaim, rejectReimbursementClaim, type ReimbursementClaim, type TeamTransaction } from '@/services/teamActivity';
+import { useOrganization } from '@/context/OrganizationContext';
 
 const money = (amount: number | string, currency: string) => new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 0 }).format(Number(amount) || 0);
 const initials = (name: string) => name.split(/[\s&]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
@@ -13,8 +14,7 @@ const transactionAmount = (transaction: TeamTransaction) => transaction.ledgerEn
 export default function TeamDetailPage() {
   const { teamId = '' } = useParams();
   const { user } = useAuth();
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [organizationId, setOrganizationId] = useState('');
+  const { activeOrganization, activeOrganizationId: organizationId, loadingOrganizations } = useOrganization();
   const [organizationDetail, setOrganizationDetail] = useState<OrganizationDetail | null>(null);
   const [detail, setDetail] = useState<TeamDetail | null>(null);
   const [remainingBudget, setRemainingBudget] = useState<RemainingBudget | null>(null);
@@ -64,29 +64,25 @@ export default function TeamDetailPage() {
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
+      if (loadingOrganizations) { setLoading(true); return; }
+      if (!organizationId) { setLoading(loadingOrganizations); return; }
       try {
         setLoading(true); setError(''); setDetail(null); setOrganizationDetail(null); setRemainingBudget(null);
-        const available = await getAllOrgs();
-        const orgs = available ?? [];
-        const matching = await Promise.all(orgs.map(async (org) => ({ org, teams: await getAllTeams(org.id) })));
-        const match = matching.find((item) => item.teams.some((team) => team.id === teamId));
-        if (!match) { if (!cancelled) setOrganizations(orgs); return; }
-        const listItem: TeamListItem | undefined = match.teams.find((team) => team.id === teamId);
-        const hasTeamAccess = Boolean(listItem && (match.org.role === 'owner' || listItem.createdById === user?.id || listItem.members.length > 0));
-        if (!hasTeamAccess) { if (!cancelled) setOrganizations(orgs); return; }
-        if (!cancelled) {
-          setOrganizations(orgs); setOrganizationId(match.org.id);
-          await loadDetail(match.org.id);
-        }
+        const [teamList, organization] = await Promise.all([getAllTeams(organizationId), getOrg(organizationId)]);
+        const listItem: TeamListItem | undefined = teamList.find((team) => team.id === teamId);
+        const hasTeamAccess = Boolean(listItem && (activeOrganization?.role === 'owner' || listItem.createdById === user?.id || listItem.members.length > 0));
+        if (!hasTeamAccess) { if (!cancelled) setDetail(null); return; }
+        if (!cancelled) { setOrganizationDetail(organization); await loadDetail(organizationId); }
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : 'Could not load this team.');
       } finally { if (!cancelled) setLoading(false); }
     };
     void load();
     return () => { cancelled = true; };
-  }, [teamId, user?.id, loadDetail]);
+  }, [teamId, user?.id, loadDetail, organizationId, activeOrganization?.role, loadingOrganizations]);
 
   const teamTransactions = useMemo(() => [...transactions].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [transactions]);
+  if (!organizationId && !loadingOrganizations) return <div className="page-wrap"><section className="panel org-home-empty"><span className="modal-icon"><UsersRound size={19}/></span><h1>Choose an organization</h1><p>Select an organization to open its team details.</p><Link className="button button-primary" to="/">View organizations</Link></section></div>;
   if (!loading && !detail && !error) return <Navigate to="/teams" replace />;
   if (!detail) return <div className="page-wrap">{error ? <div className="form-note" role="alert">{error}</div> : <section className="panel team-empty-state"><p>{loading ? 'Loading team…' : 'Team unavailable.'}</p></section>}</div>;
 

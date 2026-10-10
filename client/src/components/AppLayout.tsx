@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import TopBar from './topBar';
+import { OrganizationProvider } from '@/context/OrganizationContext';
 
 export default function AppLayout() {
   const [isDark, setIsDark] = useState(() => window.localStorage.getItem('cashflow-theme') === 'dark');
@@ -13,6 +14,7 @@ export default function AppLayout() {
   }, [isDark]);
 
   return (
+    <OrganizationProvider>
     <div className="app-frame">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} isDark={isDark} setIsDark={setIsDark} />
       <div className="app-main">
@@ -20,5 +22,6 @@ export default function AppLayout() {
         <main className="app-content"><Outlet /></main>
       </div>
     </div>
+    </OrganizationProvider>
   );
 }

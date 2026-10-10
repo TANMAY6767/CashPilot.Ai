@@ -360,7 +360,7 @@ const memberOrganizations = useMemo(
                     <div className="hidden shrink-0 items-center gap-5 text-xs tabular-nums text-text-faint sm:flex">
                       <span className="flex items-center gap-1.5">
                         <Users size={13} strokeWidth={1.75} />
-                        {organization._count?.members}
+                        {organization.memberCount}
                       </span>
 
                       {/* <span className="flex items-center gap-1.5">

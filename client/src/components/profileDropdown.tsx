@@ -1,12 +1,12 @@
 import { NavLink, useNavigate } from 'react-router-dom';
-import { CircleUserRound, Sparkles, LogOut } from 'lucide-react';
+import { CircleUserRound, Sparkles, LogOut, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 
 type NavItem = {
   to: string;
   label: string;
-  icon: React.ComponentType<{ size?: number }>;
+  icon: LucideIcon;
   end?: boolean;
 };
 

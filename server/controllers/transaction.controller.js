@@ -44,12 +44,6 @@ const parseAmount = (value) => {
 };
 
 
-/*
-  Normalize amount for Prisma Decimal.
-  Example:
-  "5000"   -> "5000.00"
-  "5000.5" -> "5000.50"
-*/
 
 const normalizeAmount = (value) => {
   const amount = String(value).trim();

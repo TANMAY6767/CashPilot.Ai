@@ -1,41 +1,76 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { ArrowRight, Building2, Plus, ReceiptText, UsersRound, Wallet } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { ArrowDownRight, ArrowRight, ArrowUpRight, Building2, CalendarDays, CircleEllipsis , Plus, ReceiptText, UsersRound, Wallet } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
+import { useOrganization } from '@/context/OrganizationContext';
+import { getAllTeams, getRemainingBudget, type RemainingBudget, type TeamListItem } from '@/services/teams/teams';
+import { getTeamTransactions, type TeamTransaction } from '@/services/teamActivity';
 
-const transactions = [
-  { title: 'Figma annual subscription', team: 'Product & Design', date: 'Today, 10:42 AM', category: 'Software', amount: 240, initials: 'ML', color: 'lavender' },
-  { title: 'Client lunch — Morrow Co.', team: 'Sales', date: 'Today, 9:18 AM', category: 'Meals', amount: 86.5, initials: 'AK', color: 'peach' },
-  { title: 'AWS cloud infrastructure', team: 'Engineering', date: 'Yesterday', category: 'Infrastructure', amount: 1240, initials: 'JR', color: 'mint' },
-  { title: 'Team offsite supplies', team: 'People & Culture', date: 'Oct 2, 2026', category: 'Office', amount: 318.2, initials: 'SC', color: 'blue' },
-];
-const budgets = [
-  { name: 'Engineering', used: 18400, total: 26000, color: 'violet', people: '8 members' },
-  { name: 'Product & Design', used: 12850, total: 18000, color: 'blue', people: '5 members' },
-  { name: 'Sales', used: 9200, total: 15000, color: 'orange', people: '6 members' },
-];
-const money = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: n % 1 ? 2 : 0 }).format(n);
+const money = (amount: number, currency = 'INR') => new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 0 }).format(Number(amount) || 0);
+const moneyByCurrency = (values: { amount: number; currency: string }[]) => {
+  const totals = values.reduce<Record<string, number>>((result, value) => { result[value.currency] = (result[value.currency] ?? 0) + value.amount; return result; }, {});
+  return Object.entries(totals).map(([currency, amount]) => money(amount, currency)).join(' · ') || money(0);
+};
+const transactionAmount = (transaction: TeamTransaction) => Number(transaction.ledgerEntries.find((entry) => entry.account.accountType === 'expense')?.debit ?? transaction.ledgerEntries[0]?.debit ?? 0);
 
 export default function DashboardPage() {
-  const [period, setPeriod] = useState('This month');
+  const { user } = useAuth();
+  const { activeOrganization, activeOrganizationId, loadingOrganizations } = useOrganization();
+  const [teams, setTeams] = useState<TeamListItem[]>([]);
+  const [budgets, setBudgets] = useState<Record<string, RemainingBudget>>({});
+  const [transactions, setTransactions] = useState<{ item: TeamTransaction; teamName: string; currency: string }[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!activeOrganizationId) { setTeams([]); setBudgets({}); setTransactions([]); return; }
+    let cancelled = false;
+    setLoading(true); setError('');
+    void (async () => {
+      try {
+        const teamList = await getAllTeams(activeOrganizationId);
+        const budgetResults = await Promise.all(teamList.filter((team) => team.budget).map(async (team) => [team.id, await getRemainingBudget(team.id)] as const));
+        const activityResults = await Promise.all(teamList.map(async (team) => ({ teamName: team.name, currency: team.budget?.currency ?? 'INR', items: await getTeamTransactions(activeOrganizationId, team.id) })));
+        if (cancelled) return;
+        setTeams(teamList);
+        setBudgets(Object.fromEntries(budgetResults));
+        setTransactions(activityResults.flatMap((result) => result.items.map((item) => ({ item, teamName: result.teamName, currency: result.currency }))).sort((a, b) => b.item.createdAt.localeCompare(a.item.createdAt)));
+      } catch (cause) {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : 'Could not load this organization overview.');
+      } finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [activeOrganizationId]);
+
+  const budgetTotals = useMemo(() => Object.values(budgets), [budgets]);
+  const budgetAllocated = moneyByCurrency(budgetTotals.map((budget) => ({ amount: budget.budget.total, currency: budget.budget.currency })));
+  const members = activeOrganization?.memberCount ?? 0;
+
+  if (loadingOrganizations) return <div className="page-wrap"><section className="panel org-home-empty"><p>Loading your workspace…</p></section></div>;
+  if (!activeOrganization) return <div className="page-wrap"><section className="panel org-home-empty"><span className="modal-icon"><Building2 size={19}/></span><h1>Choose an organization</h1><p>Select an organization from the workspace menu to see its overview.</p><Link className="button button-primary" to="/"><Building2 size={16}/>View organizations</Link></section></div>;
+
   return <div className="page-wrap">
-    <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> MONDAY, OCTOBER 5, 2026</div><h1>Good morning, Jordan <span className="wave">✦</span></h1><p>Here’s what’s happening with your organization today.</p></div><div className="heading-actions"><button className="button button-secondary"><CalendarDays size={16}/>{period}<span className="chevron">⌄</span></button><Link className="button button-primary" to="/expenses"><Plus size={17}/>New transaction</Link></div></div>
+    <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> ORGANIZATION OVERVIEW</div><h1>{activeOrganization.name}</h1><p>A clear view of this organization's teams, budgets, and spending.</p></div><div className="heading-actions"><Link className="button button-secondary" to={`/organization/${activeOrganization.id}`}>Organization details <ArrowRight size={15}/></Link><Link className="button button-primary" to="/teams"><Plus size={17}/>Manage teams</Link></div></div>
+    {error && <div className="form-note" role="alert">{error}</div>}
     <div className="metric-grid">
-      <Metric title="Total spend" value="$42,680" change="12.8%" sub="vs. last month" icon={<Wallet size={18}/>} positive={false}/>
-      <Metric title="Remaining budget" value="$27,320" change="39.0%" sub="of $70,000 total" icon={<Plus size={18}/>} positive/>
-      <Metric title="Active teams" value="8" change="2 new" sub="this quarter" icon={<UsersRound size={18}/>} positive/>
-      <Metric title="Organization members" value="24" change="3 pending" sub="invitations" icon={<Building2 size={18}/>} positive/>
+      <Metric title="Spent" value={moneyByCurrency(budgetTotals.map((budget) => ({ amount: budget.spending.spent, currency: budget.budget.currency })))} sub="Across team budgets" icon={<Wallet size={18}/>} />
+      <Metric title="Budget remaining" value={moneyByCurrency(budgetTotals.map((budget) => ({ amount: budget.remaining, currency: budget.budget.currency })))} sub={`Of ${budgetAllocated} allocated`} icon={<Wallet size={18}/>} />
+      <Metric title="Teams" value={String(teams.length)} sub="In this organization" icon={<UsersRound size={18}/>} />
+      <Metric title="Members" value={String(members)} sub={user?.name ? `Including ${user.name.split(' ')[0]}` : 'Organization members'} icon={<Building2 size={18}/>} />
     </div>
-
-    <div className="dashboard-grid">
-      <section className="panel spend-panel"><div className="panel-heading"><div><h2>Spending overview</h2><p>Track your organization's spending over time</p></div><button className="button button-quiet">Monthly <span className="chevron">⌄</span></button></div><div className="chart-summary"><strong>$42,680</strong><span className="trend trend-down"><ArrowDownRight size={14}/> 8.2%</span><span className="summary-note">vs. previous month</span></div><div className="chart-area"><div className="chart-y-labels"><span>$20k</span><span>$15k</span><span>$10k</span><span>$5k</span><span>$0</span></div><div className="chart-main"><div className="chart-grid-lines"><i/><i/><i/><i/><i/></div><div className="bars">{[44, 55, 38, 68, 55, 73, 59, 83, 68, 77, 63, 90].map((height, i) => <div className="bar-pair" key={i}><span className="bar bar-muted" style={{ height: `${height * .72}%` }}/><span className={`bar ${i === 11 ? 'bar-accent' : 'bar-main'}`} style={{ height: `${height}%` }}/></div>)}</div><div className="chart-x-labels"><span>Jan</span><span>Feb</span><span>Mar</span><span>Apr</span><span>May</span><span>Jun</span><span>Jul</span><span>Aug</span><span>Sep</span><span>Oct</span><span>Nov</span><span>Dec</span></div></div></div><div className="chart-legend"><span><i className="legend-dot legend-accent"/>This year</span><span><i className="legend-dot legend-muted"/>Last year</span></div></section>
-      <section className="panel budget-panel"><div className="panel-heading"><div><h2>Team budgets</h2><p>Budget usage by team</p></div><Link to="/teams" className="text-link">View all <ArrowRight size={14}/></Link></div><div className="budget-total"><div className="budget-ring"><span><strong>61%</strong><small>used</small></span></div><div><span className="subtle-label">TOTAL BUDGET</span><strong className="budget-total-value">$70,000</strong><span className="budget-remaining">$27,320 remaining</span></div></div><div className="budget-list">{budgets.map((item) => <div className="budget-item" key={item.name}><div className="budget-line"><span className="team-color-dot" data-tone={item.color}/><strong>{item.name}</strong><span className="budget-amount">{money(item.used)} <i>/ {money(item.total)}</i></span></div><div className="progress-track"><span className={`progress-fill ${item.color}`} style={{ width: `${item.used / item.total * 100}%` }}/></div></div>)}</div><Link to="/teams" className="panel-footer-link">Manage team budgets <ArrowRight size={15}/></Link></section>
+    <div className="dashboard-grid org-dashboard-grid">
+      <section className="panel budget-panel"><div className="panel-heading"><div><h2>Team budgets</h2><p>Remaining budget by team</p></div><Link to="/teams" className="text-link">View teams <ArrowRight size={14}/></Link></div>
+        {loading ? <div className="org-dashboard-loading">Loading team budgets…</div> : teams.length ? <div className="budget-list">{teams.map((team, index) => { const budget = budgets[team.id]; const total = budget?.budget.total ?? Number(team.budget?.totalBudget ?? 0); const spent = budget?.spending.spent ?? 0; const percent = total ? Math.min(spent / total * 100, 100) : 0; return <div className="budget-item" key={team.id}><div className="budget-line"><span className="team-color-dot" data-tone={['violet', 'blue', 'orange', 'green'][index % 4]}/><strong>{team.name}</strong><span className="budget-amount">{team.budget ? `${money(budget?.remaining ?? 0, budget?.budget.currency ?? team.budget.currency)} left` : 'No budget set'}</span></div>{team.budget && <div className="progress-track"><span className={`progress-fill ${['violet', 'blue', 'orange', 'green'][index % 4]}`} style={{ width: `${percent}%` }}/></div>}<div className="org-team-caption">{team._count.members} {team._count.members === 1 ? 'member' : 'members'}{team.budget ? ` · ${money(spent, budget?.budget.currency ?? team.budget.currency)} spent of ${money(total, team.budget.currency)}` : ''}</div></div>; })}</div> : <div className="org-dashboard-loading">No teams in this organization yet.</div>}
+      </section>
+      <section className="panel budget-panel org-quick-panel"><div className="panel-heading"><div><h2>Organization</h2><p>Your current workspace</p></div><Building2 size={19}/></div><strong className="org-quick-name">{activeOrganization.name}</strong><div className="org-quick-meta"><span>{activeOrganization.role} access</span><span>{members} members</span><span>{teams.length} teams</span></div><Link to={`/organization/${activeOrganization.id}`} className="panel-footer-link">View organization details <ArrowRight size={15}/></Link></section>
     </div>
-
-    <section className="panel transactions-panel"><div className="panel-heading"><div><h2>Recent transactions</h2><p>Your latest organization expenses</p></div><Link to="/expenses" className="text-link">See all transactions <ArrowRight size={14}/></Link></div><div className="table-scroll"><table className="data-table"><thead><tr><th>TRANSACTION</th><th>TEAM</th><th>DATE</th><th>CATEGORY</th><th className="align-right">AMOUNT</th><th/></tr></thead><tbody>{transactions.map((item) => <tr key={item.title}><td><div className="transaction-title"><span className={`merchant-icon ${item.color}`}><ReceiptText size={16}/></span><strong>{item.title}</strong></div></td><td>{item.team}</td><td>{item.date}</td><td><span className="category-pill">{item.category}</span></td><td className="align-right amount-cell">−{money(item.amount)}</td><td><button className="icon-button row-more" aria-label="More options"><CircleEllipsis size={18}/></button></td></tr>)}</tbody></table></div><Link to="/expenses" className="mobile-table-link">View all transactions <ArrowRight size={15}/></Link></section>
-    <div className="bottom-note"><span className="status-dot"/> Your workspace is up to date <span>•</span> Last synced just now</div>
+    <section className="panel transactions-panel"><div className="panel-heading"><div><h2>Recent transactions</h2><p>Latest spending recorded by this organization's teams</p></div><Link to="/expenses" className="text-link">All transactions <ArrowRight size={14}/></Link></div>
+      {loading ? <div className="org-dashboard-loading">Loading recent activity…</div> : transactions.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>TRANSACTION</th><th>TEAM</th><th>PAID BY</th><th>DATE</th><th className="align-right">AMOUNT</th></tr></thead><tbody>{transactions.slice(0, 6).map(({ item, teamName, currency: itemCurrency }) => <tr key={item.id}><td><div className="transaction-title"><span className="merchant-icon lavender"><ReceiptText size={16}/></span><div className="transaction-copy"><strong>{item.description || 'Team transaction'}</strong><small>{item.transactionType.replace(/_/g, ' ')}</small></div></div></td><td>{teamName}</td><td>{item.createdBy?.name ?? '—'}</td><td>{new Date(item.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</td><td className="align-right amount-cell">{item.transactionType === 'REIMBURSEMENT_REJECTION_REVERSAL' ? '+' : '−'}{money(transactionAmount(item), itemCurrency)}</td></tr>)}</tbody></table></div> : <div className="org-dashboard-loading"><ReceiptText size={18}/><span>No transactions have been recorded for this organization.</span></div>}
+    </section>
+    <div className="bottom-note"><span className="status-dot"/> Viewing {activeOrganization.name} <span>·</span> Data is scoped to this organization</div>
   </div>;
 }
 
-function Metric({ title, value, change, sub, icon, positive }: { title: string; value: string; change: string; sub: string; icon: React.ReactNode; positive: boolean }) {
-  return <section className="panel metric-card"><div className="metric-top"><span>{title}</span><span className="metric-icon">{icon}</span></div><strong className="metric-value">{value}</strong><div className="metric-foot"><span className={`metric-change ${positive ? 'change-good' : 'change-warn'}`}>{positive ? <ArrowUpRight size={14}/> : <ArrowDownRight size={14}/>} {change}</span><span>{sub}</span></div></section>;
+function Metric({ title, value, sub, icon }: { title: string; value: string; sub: string; icon: React.ReactNode }) {
+  return <section className="panel metric-card"><div className="metric-top"><span>{title}</span><span className="metric-icon">{icon}</span></div><strong className="metric-value">{value}</strong><div className="metric-foot"><span>{sub}</span></div></section>;
 }
