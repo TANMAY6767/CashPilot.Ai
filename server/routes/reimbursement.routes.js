@@ -7,16 +7,17 @@ import {
   payReimbursementClaim,
 } from "../controllers/team.controller.js";
 import { checkAuth } from "../middleware/index.js";
+import { auditMutation } from "../services/auditLog.service.js";
 
 const router = Router();
 router.use(checkAuth);
 
 router.route("/org/:orgId/teams/:teamId/reimbursement-claims")
   .get(getTeamReimbursementClaims)
-  .post(createReimbursementClaim);
+  .post(auditMutation, createReimbursementClaim);
 
-router.patch("/org/:orgId/reimbursement-claims/:claimId/approve", approveReimbursementClaim);
-router.patch("/org/:orgId/reimbursement-claims/:claimId/reject", rejectReimbursementClaim);
-router.patch("/org/:orgId/reimbursement-claims/:claimId/pay", payReimbursementClaim);
+router.patch("/org/:orgId/reimbursement-claims/:claimId/approve", auditMutation, approveReimbursementClaim);
+router.patch("/org/:orgId/reimbursement-claims/:claimId/reject", auditMutation, rejectReimbursementClaim);
+router.patch("/org/:orgId/reimbursement-claims/:claimId/pay", auditMutation, payReimbursementClaim);
 
 export default router;

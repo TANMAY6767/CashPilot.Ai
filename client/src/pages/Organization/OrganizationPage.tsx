@@ -59,7 +59,7 @@ export default function OrganizationPage() {
     {(organizationError || error) && <div className="form-note" role="alert">{error || organizationError}</div>}
     {loadingOrganizations ? <section className="panel org-home-empty"><p>Loading your organizations…</p></section> : organizations.length ? <div className="organization-grid">
       {organizations.map((organization, index) => <button className="panel organization-card org-home-card" key={organization.id} onClick={() => openOrganization(organization.id)}>
-        <div className="org-card-top"><div className={`org-avatar org-tone-${['violet', 'green', 'blue', 'orange'][index % 4]}`}>{initials(organization.name)}</div><span className="role-pill role-owner">{organization.role}</span></div>
+        <div className="org-card-top"><div className={`org-avatar org-tone-${['violet', 'green', 'blue', 'orange'][index % 4]}`}>{initials(organization.name)}</div><span className={`role-pill role-${organization.role.toLowerCase()}`}>{organization.role}</span></div>
         <div className="org-card-title"><h3>{organization.name}</h3><ArrowRight size={18}/></div>
         <p className="org-home-hint">Open organization overview</p>
         <div className="org-card-stats"><span><UsersRound size={15}/>{organization.memberCount} {organization.memberCount === 1 ? 'member' : 'members'}</span><span><Building2 size={15}/>{organization.teamCount} {organization.teamCount === 1 ? 'team' : 'teams'}</span></div>

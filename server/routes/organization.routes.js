@@ -19,6 +19,7 @@ import {
 } from "../controllers/orgs.controller.js";
 
 import { checkAuth } from "../middleware/index.js";
+import { auditMutation } from "../services/auditLog.service.js";
 
 const router = Router();
 router.get("/invitations/:token", getInvitationDetails);
@@ -36,7 +37,7 @@ router.use(checkAuth);
 router
   .route("/")
   .get(getAllOrgs)
-  .post(createOrg);
+  .post(auditMutation, createOrg);
 
 
 // GET    /organizations/:orgId
@@ -45,8 +46,8 @@ router
 router
   .route("/:orgId")
   .get(getOrganization)
-  .patch(updateOrganization)
-  .delete(deleteOrganization);
+  .patch(auditMutation, updateOrganization)
+  .delete(auditMutation, deleteOrganization);
 
 
 // =========================================================
@@ -58,31 +59,31 @@ router
 router
   .route("/:orgId/members")
   .get(getOrganizationMembers)
-  .post(addOrganizationMember);
+  .post(auditMutation, addOrganizationMember);
 
 
 // PATCH /organizations/:orgId/members/:memberUserId
 router
   .route("/:orgId/members/:memberUserId")
-  .patch(updateOrganizationMemberRole)
+  .patch(auditMutation, updateOrganizationMemberRole)
 
   // DELETE /organizations/:orgId/members/:memberUserId
-  .delete(removeOrganizationMember);
+  .delete(auditMutation, removeOrganizationMember);
 
 // POST /api/teams/:teamId/invitations
 router.route("/:orgId/invitations")
-  .post(sendOrgInvitationEmail);
+  .post(auditMutation, sendOrgInvitationEmail);
 
 
 // POST /api/invitations/:token/accept
 router.route("/invitations/:token/accept")
-  .post(acceptInvitation);
+  .post(auditMutation, acceptInvitation);
 
 router.route("/:orgId/accounts")
   .get(getOrganizationAccounts);
 
 router.route("/:orgId/addfunds")
-  .post(addFunds);
+  .post(auditMutation, addFunds);
 
 router.route("/:orgId/getfunds")
   .get(getFinancialCashFunds);

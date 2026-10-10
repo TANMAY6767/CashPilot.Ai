@@ -288,21 +288,6 @@ const createTransaction = asyncHandler(async (req, res) => {
       },
     });
 
-    await tx.auditLog.create({
-      data: {
-        userId,
-        entityType: "transaction",
-        entityId: newTransaction.id,
-        action: "create",
-        newValue: {
-          transactionType,
-          description: description || null,
-          referenceId: referenceId || null,
-          entries: normalizedEntries,
-        },
-      },
-    });
-
     return newTransaction;
   });
 

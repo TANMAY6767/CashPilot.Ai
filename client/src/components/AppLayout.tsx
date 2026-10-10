@@ -15,13 +15,13 @@ export default function AppLayout() {
 
   return (
     <OrganizationProvider>
-    <div className="app-frame">
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} isDark={isDark} setIsDark={setIsDark} />
-      <div className="app-main">
-        <TopBar onMenuClick={() => setSidebarOpen(true)} />
-        <main className="app-content"><Outlet /></main>
+      <div className="app-frame">
+        <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} isDark={isDark} setIsDark={setIsDark} />
+        <div className="app-main">
+          <TopBar onMenuClick={() => setSidebarOpen(true)} />
+          <main className="app-content"><Outlet /></main>
+        </div>
       </div>
-    </div>
     </OrganizationProvider>
   );
 }

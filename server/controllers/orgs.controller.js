@@ -638,7 +638,7 @@ const sendOrgInvitationEmail = asyncHandler(async (req, res) => {
   return sendResponse(
     res,
     "success",
-    null,
+    { id: invitation.id, email: invitation.email, role: invitation.role, status: invitation.status, expiresAt: invitation.expiresAt },
     "Invitation sent successfully",
     statusType.OK
   );

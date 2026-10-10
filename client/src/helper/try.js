@@ -1,5 +1,4 @@
 // import axios from "axios";
-// import { EventSourcePolyfill } from "event-source-polyfill";
 // import { getAccessToken } from '@/services/api';
 
 
@@ -114,33 +113,6 @@
 //         withCredentials: true
 //       })
 //     )
-// };
-
-// export const apiClientEvents = {
-//   events: (url, { onMessage, onError, onOpen } = {}, headers = {}) => {
-//     const evtSource = new EventSourcePolyfill(`${base_url}${url}`, {
-//       headers: {
-//         ...headers,
-//         Authorization: `Bearer ${getAccessToken()}`
-//       },
-//       withCredentials: true
-//     });
-
-//     if (onOpen) evtSource.onopen = onOpen;
-//     if (onMessage) {
-//       evtSource.onmessage = (e) => {
-//         try {
-//           const data = JSON.parse(e.data);
-//           onMessage(data, e);
-//         } catch {
-//           onMessage(e.data, e);
-//         }
-//       };
-//     }
-//     if (onError) evtSource.onerror = onError;
-
-//     return evtSource;
-//   }
 // };
 
 // // helper/responseHandler.js
