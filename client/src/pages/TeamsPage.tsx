@@ -1,44 +1,155 @@
-import { useState } from 'react';
-import { ArrowRight, ChevronDown, CircleEllipsis, Plus, Search, UsersRound, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { ArrowRight, Plus, Search, ShieldCheck, UsersRound, WalletCards, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { useAuth } from '@/context/AuthContext';
+import { getAllOrgs, getOrg, type Organization, type OrganizationDetail } from '@/services/oraganizations/org.services';
+import { createTeam, createTeamBudget, deleteTeam, getAllTeams, getRemainingBudget, updateTeam, updateTeamBudget, type RemainingBudget, type TeamListItem } from '@/services/teams/teams';
 
-type Team = { name: string; description: string; budget: number; spent: number; members: number; tone: string };
-const startingTeams: Team[] = [
-  { name: 'Engineering', description: 'Product development & infrastructure', budget: 26000, spent: 18400, members: 8, tone: 'violet' },
-  { name: 'Product & Design', description: 'Research, design & product strategy', budget: 18000, spent: 12850, members: 5, tone: 'blue' },
-  { name: 'Sales', description: 'Customer growth & partnerships', budget: 15000, spent: 9200, members: 6, tone: 'orange' },
-  { name: 'People & Culture', description: 'Hiring, team & workplace', budget: 8000, spent: 3470, members: 3, tone: 'green' },
-  { name: 'Operations', description: 'Finance, legal & business operations', budget: 3000, spent: 2760, members: 2, tone: 'rose' },
-  { name: 'Marketing', description: 'Brand, content & communications', budget: 10000, spent: 5400, members: 4, tone: 'amber' },
-];
-const currency = (amount: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(amount);
+type ModalMode = 'create' | 'rename' | 'budget';
+const money = (amount: number | string, currency = 'INR') => new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 0 }).format(Number(amount) || 0);
+const initials = (name: string) => name.split(/[\s&]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
 
 export default function TeamsPage() {
-  const [teams, setTeams] = useState(startingTeams);
+  const { user } = useAuth();
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [organizationId, setOrganizationId] = useState('');
+  const [organizationDetail, setOrganizationDetail] = useState<OrganizationDetail | null>(null);
+  const [teams, setTeams] = useState<TeamListItem[]>([]);
+  const [remaining, setRemaining] = useState<Record<string, RemainingBudget>>({});
   const [query, setQuery] = useState('');
-  const [showForm, setShowForm] = useState(false);
-  const [modalMode, setModalMode] = useState<'create' | 'budget' | 'member'>('create');
-  const [selectedTeam, setSelectedTeam] = useState('');
-  const [memberName, setMemberName] = useState('');
-  const [name, setName] = useState('');
-  const [budget, setBudget] = useState('');
-  const [activeTab, setActiveTab] = useState<'teams' | 'members'>('teams');
-  const filtered = teams.filter((team) => team.name.toLowerCase().includes(query.toLowerCase()));
-  const createTeam = (event: React.FormEvent) => { event.preventDefault(); if (!name.trim()) return; setTeams([{ name: name.trim(), description: 'Add a short description for this team', budget: Number(budget) || 0, spent: 0, members: 0, tone: 'violet' }, ...teams]); setName(''); setBudget(''); setShowForm(false); };
-  const openModal = (mode: typeof modalMode, teamName = '') => { setModalMode(mode); setSelectedTeam(teamName); setShowForm(true); };
-  const saveTeamChange = (event: React.FormEvent) => { event.preventDefault(); if (modalMode === 'budget') setTeams((current) => current.map((team) => team.name === selectedTeam ? { ...team, budget: Number(budget) || team.budget } : team)); if (modalMode === 'member' && memberName) setTeams((current) => current.map((team) => team.name === selectedTeam ? { ...team, members: team.members + 1 } : team)); setBudget(''); setMemberName(''); setShowForm(false); };
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [modal, setModal] = useState<ModalMode | null>(null);
+  const [selectedTeam, setSelectedTeam] = useState<TeamListItem | null>(null);
+  const [teamName, setTeamName] = useState('');
+  const [budgetValue, setBudgetValue] = useState('');
+  const [currency, setCurrency] = useState('INR');
+
+  const organization = organizations.find((item) => item.id === organizationId) ?? null;
+  const isOrganizationOwner = organization?.role === 'owner';
+  const visibleTeams = useMemo(() => teams.filter((team) => {
+    const hasAccess = isOrganizationOwner || team.createdById === user?.id || team.members.length > 0;
+    return hasAccess && team.name.toLowerCase().includes(query.toLowerCase());
+  }), [teams, query, isOrganizationOwner, user?.id]);
+
+  const loadTeams = useCallback(async (orgId: string) => {
+    if (!orgId) { setTeams([]); setRemaining({}); setOrganizationDetail(null); return; }
+    const [teamResults, orgDetail] = await Promise.all([getAllTeams(orgId), getOrg(orgId)]);
+    setTeams(teamResults);
+    setOrganizationDetail(orgDetail);
+    const budgetResults = await Promise.allSettled(teamResults.filter((team) => team.budget).map((team) => getRemainingBudget(team.id)));
+    const nextRemaining: Record<string, RemainingBudget> = {};
+    budgetResults.forEach((result, index) => { if (result.status === 'fulfilled') nextRemaining[teamResults.filter((team) => team.budget)[index].id] = result.value; });
+    setRemaining(nextRemaining);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadOrganizations = async () => {
+      try {
+        setLoading(true); setError('');
+        const result = await getAllOrgs();
+        if (cancelled) return;
+        const available = result ?? [];
+        setOrganizations(available);
+        setOrganizationId((current) => available.some((org) => org.id === current) ? current : available[0]?.id ?? '');
+      } catch (cause) {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : 'Could not load organizations.');
+      } finally { if (!cancelled) setLoading(false); }
+    };
+    void loadOrganizations();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!organizationId) { setTeams([]); setOrganizationDetail(null); return; }
+    let cancelled = false;
+    setLoading(true); setError('');
+    void loadTeams(organizationId).catch((cause) => {
+      if (!cancelled) setError(cause instanceof Error ? cause.message : 'Could not load teams.');
+    }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [organizationId, loadTeams]);
+
+  const openModal = (mode: ModalMode, team: TeamListItem | null = null) => {
+    setError(''); setSelectedTeam(team); setTeamName(team?.name ?? '');
+    setBudgetValue(team?.budget?.totalBudget ?? ''); setCurrency(team?.budget?.currency ?? 'INR'); setModal(mode);
+  };
+
+  const refresh = async () => { if (organizationId) await loadTeams(organizationId); };
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); if (!organizationId || saving) return;
+    setSaving(true); setError('');
+    try {
+      if (modal === 'create') {
+        if (budgetValue.trim() && (!Number.isFinite(Number(budgetValue)) || Number(budgetValue) <= 0)) {
+          throw new Error('Enter a valid budget greater than zero.');
+        }
+        const created = await createTeam(organizationId, { name: teamName.trim() });
+        if (!created) throw new Error('Could not create team.');
+        if (budgetValue.trim()) {
+          try { await createTeamBudget(created.id, Number(budgetValue), currency); }
+          catch (cause) {
+            await refresh();
+            throw new Error(`Team created, but its budget could not be saved: ${cause instanceof Error ? cause.message : 'Please try again.'}`);
+          }
+        }
+      } else if (modal === 'rename' && selectedTeam) {
+        await updateTeam(organizationId, selectedTeam.id, teamName.trim());
+      } else if (modal === 'budget' && selectedTeam) {
+        const amount = Number(budgetValue);
+        if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a budget greater than zero.');
+        if (selectedTeam.budget) await updateTeamBudget(selectedTeam.id, amount, currency);
+        else await createTeamBudget(selectedTeam.id, amount, currency);
+      }
+      await refresh(); setModal(null);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save this change.'); }
+    finally { setSaving(false); }
+  };
+
+  const removeTeam = async (team: TeamListItem) => {
+    if (!organizationId || !window.confirm(`Delete ${team.name}? This will remove its team data.`)) return;
+    setError('');
+    try { await deleteTeam(organizationId, team.id); await refresh(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not delete team.'); }
+  };
 
   return <div className="page-wrap">
-    <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> ORGANIZATION</div><h1>Teams & budgets</h1><p>Organize your people and keep team spending on track.</p></div><button className="button button-primary" onClick={() => openModal('create')}><Plus size={17}/>Create team</button></div>
-    <div className="organization-bar panel"><div className="org-avatar">N</div><div className="org-name-block"><span className="subtle-label">CURRENT ORGANIZATION</span><strong>Northstar Studio</strong></div><button className="button button-secondary org-switch">Switch organization <ChevronDown size={15}/></button></div>
-    <div className="tabs-row"><button className={`tab-button ${activeTab === 'teams' ? 'tab-active' : ''}`} onClick={() => setActiveTab('teams')}>Teams <span>{teams.length}</span></button><button className={`tab-button ${activeTab === 'members' ? 'tab-active' : ''}`} onClick={() => setActiveTab('members')}>Members <span>24</span></button><div className="tabs-spacer"/><label className="search-field"><Search size={16}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={activeTab === 'teams' ? 'Search teams' : 'Search members'}/></label></div>
-    {activeTab === 'teams' ? <><div className="section-inline-heading"><div><h2>All teams <span className="inline-count">{teams.length}</span></h2><p>Team budgets reset at the start of each month.</p></div><button className="button button-quiet">All teams <ChevronDown size={15}/></button></div><div className="team-grid">{filtered.map((team) => <article className="panel team-card" key={team.name}><div className="team-card-top"><div className={`team-avatar tone-${team.tone}`}>{team.name.split(/\s|&/).filter(Boolean).map((x) => x[0]).slice(0, 2).join('').toUpperCase()}</div><button className="icon-button" aria-label={`Options for ${team.name}`}><CircleEllipsis size={20}/></button></div><h3>{team.name}</h3><p className="team-description">{team.description}</p><div className="team-members-line"><div className="avatar-stack"><span className="avatar avatar-small avatar-indigo">JD</span><span className="avatar avatar-small avatar-pink">AK</span><span className="avatar avatar-small avatar-green">ML</span>{team.members > 3 && <span className="avatar avatar-small avatar-gray">+{team.members - 3}</span>}</div><span>{team.members} members</span><button className="add-member" aria-label={`Add member to ${team.name}`} onClick={() => openModal('member', team.name)}><Plus size={15}/></button></div><div className="team-card-divider"/><div className="team-budget-head"><span>Monthly budget</span><button className="edit-budget-button" onClick={() => { setBudget(String(team.budget)); openModal('budget', team.name); }}>Edit budget</button><span><strong>{currency(team.spent)}</strong> <i>of {currency(team.budget)}</i></span></div><div className="progress-track progress-large"><span className={`progress-fill ${team.tone}`} style={{ width: `${team.budget ? Math.min(100, team.spent / team.budget * 100) : 0}%` }}/></div><div className="team-budget-bottom"><span>{team.budget ? Math.round(team.spent / team.budget * 100) : 0}% used</span><span>{currency(Math.max(0, team.budget - team.spent))} left</span></div><button className="team-open-link">View team details <ArrowRight size={15}/></button></article>)}</div></> : <MembersPanel query={query}/>}
-    <div className="bottom-note"><span className="status-dot"/> Changes are saved automatically</div>
-    {showForm && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowForm(false); }}><form className="modal-card" onSubmit={modalMode === 'create' ? createTeam : saveTeamChange}><div className="modal-heading"><div><span className="modal-icon"><UsersRound size={18}/></span><h2>{modalMode === 'create' ? 'Create a team' : modalMode === 'budget' ? 'Edit team budget' : `Add member to ${selectedTeam}`}</h2><p>{modalMode === 'create' ? 'Set up a team and give them a monthly budget.' : modalMode === 'budget' ? 'Update the monthly spending limit for this team.' : 'Choose an organization member and assign their team role.'}</p></div><button type="button" className="icon-button" onClick={() => setShowForm(false)} aria-label="Close"><X size={19}/></button></div>{modalMode === 'create' && <label className="form-label">Team name<input autoFocus required value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Customer success"/></label>}{modalMode !== 'member' ? <label className="form-label">Monthly budget<div className="input-with-prefix"><span>$</span><input autoFocus={modalMode === 'budget'} type="number" min="0" value={budget} onChange={(event) => setBudget(event.target.value)} placeholder="0.00"/></div></label> : <><label className="form-label">Organization member<select required value={memberName} onChange={(event) => setMemberName(event.target.value)}><option value="">Select a member</option><option>Alex Kim</option><option>Morgan Lee</option><option>Sam Chen</option></select></label><label className="form-label">Team role<select><option>Member</option><option>Team admin</option></select></label></>}<div className="form-note"><Plus size={16}/> {modalMode === 'member' ? 'They must already belong to this organization.' : 'You can adjust the budget and team members any time.'}</div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setShowForm(false)}>Cancel</button><button type="submit" className="button button-primary"><Plus size={16}/>{modalMode === 'create' ? 'Create team' : modalMode === 'budget' ? 'Save budget' : 'Add to team'}</button></div></form></div>}
-  </div>;
-}
+    <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> ORGANIZATION</div><h1>Teams &amp; budgets</h1><p>Organize your people and keep team spending on track.</p></div><button className="button button-primary" onClick={() => openModal('create')} disabled={!organizationId}><Plus size={16}/>Create team</button></div>
 
-function MembersPanel({ query }: { query: string }) {
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const people = [{ name: 'Jordan Davis', email: 'jordan@northstar.co', org: 'Owner', team: 'Engineering', initials: 'JD' }, { name: 'Alex Kim', email: 'alex@northstar.co', org: 'Admin', team: 'Sales', initials: 'AK' }, { name: 'Morgan Lee', email: 'morgan@northstar.co', org: 'Member', team: 'Product & Design', initials: 'ML' }, { name: 'Sam Chen', email: 'sam@northstar.co', org: 'Member', team: 'People & Culture', initials: 'SC' }].filter((person) => `${person.name} ${person.email}`.toLowerCase().includes(query.toLowerCase()));
-  return <><section className="panel member-panel"><div className="panel-heading"><div><h2>Organization members</h2><p>Manage access and organization roles.</p></div><button className="button button-primary" onClick={() => setInviteOpen(true)}><Plus size={16}/>Invite members</button></div><div className="table-scroll"><table className="data-table member-table"><thead><tr><th>MEMBER</th><th>ORG ROLE</th><th>TEAM</th><th>TEAM ROLE</th><th/></tr></thead><tbody>{people.map((person) => <tr key={person.email}><td><div className="person-cell"><span className="avatar avatar-small avatar-indigo">{person.initials}</span><div><strong>{person.name}</strong><span>{person.email}</span></div></div></td><td><select className="role-select" defaultValue={person.org}><option>Owner</option><option>Admin</option><option>Member</option></select></td><td>{person.team}</td><td><select className="role-select" defaultValue="Member"><option>Team admin</option><option>Member</option></select></td><td><button className="icon-button"><CircleEllipsis size={18}/></button></td></tr>)}</tbody></table></div></section>{inviteOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setInviteOpen(false); }}><form className="modal-card" onSubmit={(event) => { event.preventDefault(); setInviteOpen(false); }}><div className="modal-heading"><div><span className="modal-icon"><UsersRound size={18}/></span><h2>Invite organization members</h2><p>Invite a teammate before adding them to a team.</p></div><button type="button" className="icon-button" onClick={() => setInviteOpen(false)} aria-label="Close"><X size={19}/></button></div><label className="form-label">Email addresses<input required type="email" placeholder="teammate@company.com"/></label><label className="form-label">Organization role<select><option>Member</option><option>Admin</option></select></label><div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setInviteOpen(false)}>Cancel</button><button type="submit" className="button button-primary"><Plus size={16}/>Send invite</button></div></form></div>}</>;
+    <div className="team-workspace panel"><div className="workspace-avatar">{organization ? initials(organization.name).slice(0, 1) : '?'}</div><div><span className="subtle-label">CURRENT ORGANIZATION</span>{organizations.length > 1 ? <select className="team-organization-select" aria-label="Select organization" value={organizationId} onChange={(event) => setOrganizationId(event.target.value)}>{organizations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select> : <strong>{organization?.name ?? (loading ? 'Loading organizations…' : 'No organization')}</strong>}</div><span className="team-workspace-meta">{visibleTeams.length} {visibleTeams.length === 1 ? 'team' : 'teams'} available</span></div>
+
+    {error && <div className="form-note team-page-error" role="alert">{error}</div>}
+    {!loading && !organizations.length && <section className="panel team-empty-state"><span><UsersRound size={20}/></span><h2>No organizations found</h2><p>Join an organization to view or create its teams.</p></section>}
+
+    {organization && <>
+      <div className="team-list-toolbar"><div><h2>{isOrganizationOwner ? 'All teams' : 'Your teams'} <span className="inline-count">{visibleTeams.length}</span></h2><p>{isOrganizationOwner ? 'As organization owner, you can see every team.' : 'You can see teams where you are a member or admin.'}</p></div><label className="search-field"><Search size={16}/><input aria-label="Search teams" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search teams"/></label></div>
+      {loading ? <section className="panel team-empty-state"><p>Loading teams…</p></section> : visibleTeams.length ? <div className="team-grid">
+        {visibleTeams.map((team, index) => {
+          const budgetSummary = remaining[team.id];
+          const isCreator = team.createdById === user?.id;
+          const total = Number(team.budget?.totalBudget ?? 0);
+          const spent = budgetSummary?.spending.spent ?? 0;
+          const left = budgetSummary?.remaining;
+          return <article className="panel team-card team-card-modern" key={team.id}>
+            <div className="team-card-top"><div className={`team-avatar tone-${['violet', 'blue', 'green', 'orange'][index % 4]}`}>{initials(team.name)}</div><span className="team-access-chip"><ShieldCheck size={13}/>{isOrganizationOwner ? 'Owner access' : team.members[0]?.role ?? 'Member'}</span></div>
+            <h3>{team.name}</h3><p className="team-description">{organizationDetail?.name ?? organization?.name} team</p>
+            <div className="team-card-stats"><span><UsersRound size={15}/>{team._count.members} {team._count.members === 1 ? 'member' : 'members'}</span><span><WalletCards size={15}/>{team.budget ? 'Budget set' : 'No budget'}</span></div>
+            <div className="team-budget-overview"><div><span>Budget</span><strong>{team.budget ? money(total, team.budget.currency) : 'Not set'}</strong></div><div><span>Remaining</span><strong className={left !== undefined && left < 0 ? 'budget-over' : ''}>{team.budget ? left === undefined ? 'Unavailable' : money(left, budgetSummary?.budget.currency ?? team.budget.currency) : '—'}</strong></div></div>
+            {team.budget && <><div className="team-budget-track"><span style={{ width: `${Math.min(total ? (spent / total) * 100 : 0, 100)}%` }}/></div><div className="team-budget-caption">{budgetSummary ? `${money(spent, budgetSummary.budget.currency)} spent · ${Math.round(total ? spent / total * 100 : 0)}% used` : 'Spending summary unavailable'}</div></>}
+            <div className="team-card-controls">{isCreator && <><button className="edit-budget-button" onClick={() => openModal('rename', team)}>Rename</button><button className="edit-budget-button" onClick={() => openModal('budget', team)}>{team.budget ? 'Edit budget' : 'Set budget'}</button><button className="edit-budget-button team-delete-action" onClick={() => void removeTeam(team)}>Delete</button></>}<Link className="team-open-link" to={`/teams/${team.id}`}>Open team details <ArrowRight size={15}/></Link></div>
+          </article>;
+        })}
+      </div> : <section className="panel team-empty-state"><span><UsersRound size={20}/></span><h2>{teams.length ? 'No matching teams' : 'No teams yet'}</h2><p>{teams.length ? 'Try a different search.' : 'Create a team to organize this organization.'}</p></section>}
+    </>}
+
+    {modal && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setModal(null); }}><form className="modal-card" onSubmit={(event) => void submit(event)}>
+      <div className="modal-heading"><div><span className="modal-icon"><UsersRound size={18}/></span><h2>{modal === 'create' ? 'Create a team' : modal === 'rename' ? 'Rename team' : 'Team budget'}</h2><p>{modal === 'create' ? 'Create a team for this organization.' : modal === 'rename' ? 'Update the name shown to the team.' : 'Set the monthly spending limit for this team.'}</p></div><button type="button" className="icon-button" onClick={() => setModal(null)} aria-label="Close" disabled={saving}><X size={18}/></button></div>
+      {(modal === 'create' || modal === 'rename') && <label className="form-label">Team name<input autoFocus required maxLength={100} value={teamName} onChange={(event) => setTeamName(event.target.value)} placeholder="e.g. Customer success"/></label>}
+      {(modal === 'create' || modal === 'budget') && <><label className="form-label">{modal === 'create' ? 'Initial monthly budget (optional)' : 'Monthly budget'}<input type="number" min="0.01" step="0.01" required={modal === 'budget'} value={budgetValue} onChange={(event) => setBudgetValue(event.target.value)} placeholder="0.00"/></label><label className="form-label">Currency<select value={currency} onChange={(event) => setCurrency(event.target.value)}><option value="INR">INR — Indian Rupee</option><option value="USD">USD — US Dollar</option><option value="EUR">EUR — Euro</option><option value="GBP">GBP — British Pound</option></select></label></>}
+      {error && <div className="form-note" role="alert">{error}</div>}<div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setModal(null)} disabled={saving}>Cancel</button><button type="submit" className="button button-primary" disabled={saving}>{saving ? 'Saving…' : modal === 'create' ? 'Create team' : modal === 'rename' ? 'Save name' : 'Save budget'}</button></div>
+    </form></div>}
+  </div>;
 }

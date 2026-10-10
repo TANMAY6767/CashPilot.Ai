@@ -32,7 +32,7 @@ app.use("/users", userRoutes);
 app.use("/org", orgRoutes);
 app.use("/", teamRoutes);
 // app.use("/teams", accountRoutes);
-// app.use("/teams", budgetRoutes);
+app.use("/teams", budgetRoutes);
 // app.use("/teams", ledgerRoutes);
 // app.use("/teams", transactionRoutes);
 // app.use("/audit-logs", auditLogsRoutes);

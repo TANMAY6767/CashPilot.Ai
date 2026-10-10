@@ -41,64 +41,6 @@ const getAccountDescription = (account: OrgAccounts) => {
   return 'Current balance calculated from this account’s ledger entries.';
 };
 
-const people = [
-  {
-    name: "Jordan Davis",
-    email: "jordan@northstar.co",
-    role: "Owner",
-    teams: "Engineering",
-    initials: "JD",
-    color: "indigo",
-  },
-  {
-    name: "Alex Kim",
-    email: "alex@northstar.co",
-    role: "Admin",
-    teams: "Sales, Marketing",
-    initials: "AK",
-    color: "pink",
-  },
-  {
-    name: "Morgan Lee",
-    email: "morgan@northstar.co",
-    role: "Member",
-    teams: "Product & Design",
-    initials: "ML",
-    color: "green",
-  },
-  {
-    name: "Sam Chen",
-    email: "sam@northstar.co",
-    role: "Member",
-    teams: "People & Culture",
-    initials: "SC",
-    color: "blue",
-  },
-];
-
-const teams = [
-  {
-    name: "Engineering",
-    members: 8,
-    budget: "$26,000",
-    tone: "violet",
-    initials: "EN",
-  },
-  {
-    name: "Product & Design",
-    members: 5,
-    budget: "$18,000",
-    tone: "blue",
-    initials: "PD",
-  },
-  {
-    name: "Sales",
-    members: 6,
-    budget: "$15,000",
-    tone: "orange",
-    initials: "SA",
-  },
-];
 
 export default function OrganizationOverview() {
   const { orgId } = useParams<{ orgId: string }>();

@@ -3,14 +3,24 @@ import { Router } from "express";
 import {
   getAllTeams,
   getOneTeam,
+
   createTeam,
   updateTeam,
   deleteTeam,
+
   getTeamMembers,
+  addTeamMember,
+
   sendTeamInvitationEmail,
   acceptInvitation,
+
   updateTeamMemberRole,
   removeTeamMember,
+
+  createReimbursementClaim,
+  approveReimbursementClaim,
+  rejectReimbursementClaim
+
 } from "../controllers/team.controller.js";
 
 import { checkAuth } from "../middleware/index.js";
@@ -49,7 +59,8 @@ router.route("/:orgId/teams/:teamId")
 
 // GET /api/teams/:teamId/members
 router.route("/teams/:teamId/members")
-  .get(getTeamMembers);
+  .get(getTeamMembers)
+  .post(addTeamMember);
 
 
 // PATCH  /api/teams/:teamId/members/:memberUserId
@@ -72,6 +83,27 @@ router.route("/teams/:teamId/invitations")
 // POST /api/invitations/:token/accept
 router.route("/invitations/:token/accept")
   .post(acceptInvitation);
+
+
+router.post(
+  "/:orgId/teams/:teamId/transactions",
+  createReimbursementClaim
+);
+
+router.post(
+  "/:orgId/teams/:teamId/reimbursement-claims",
+  createReimbursementClaim
+);
+
+router.patch(
+  "/organizations/:orgId/reimbursement-claims/:claimId/approve",
+  approveReimbursementClaim
+);
+
+router.patch(
+  "/organizations/:orgId/reimbursement-claims/:claimId/reject",
+  rejectReimbursementClaim
+);
 
 
 export default router;

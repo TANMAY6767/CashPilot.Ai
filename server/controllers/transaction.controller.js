@@ -1,4 +1,9 @@
 import prisma from "../prisma/client.js";
+import { ApiError } from "../utils/ApiError.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { sendResponse, statusType } from "../utils/index.js";
+import { sendEmail } from "../services/email.service.js";
+import crypto from "crypto";
 
 
 const getUserId = (req) => req.user?._id;
@@ -66,10 +71,6 @@ const isValidUUID = (value) => {
 };
 
 
-/*
-  Check that the logged-in user belongs to the team.
-*/
-
 const getTeamMember = async (teamId, userId) => {
   return prisma.teamMember.findUnique({
     where: {
@@ -88,292 +89,237 @@ const getTeamMember = async (teamId, userId) => {
   });
 };
 
+const createTransaction = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { teamId } = req.params;
 
-/* =========================================================
-   1. CREATE TRANSACTION
-   ========================================================= */
+  const {
+    transactionType,
+    description,
+    referenceId,
+    entries,
+  } = req.body ?? {};
 
-const createTransaction = async (req, res) => {
-  try {
-    const userId = getUserId(req);
-
-    const { teamId } = req.params;
-
-    const {
-      transactionType,
-      description,
-      referenceId,
-      entries,
-    } = req.body;
-
-    if (!userId) {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
-    }
-
-    if (!teamId || !transactionType || !entries) {
-      return res.status(400).json({
-        message:
-          "Team ID, transaction type and entries are required",
-      });
-    }
-
-    /*
-      A transaction needs at least two ledger entries.
-    */
-
-    if (!Array.isArray(entries) || entries.length < 2) {
-      return res.status(400).json({
-        message:
-          "A transaction must contain at least two ledger entries",
-      });
-    }
-
-    /*
-      User must belong to the team.
-    */
-
-    const teamMember = await getTeamMember(teamId, userId);
-
-    if (!teamMember) {
-      return res.status(403).json({
-        message: "You are not a member of this team",
-      });
-    }
-
-    /*
-      Validate referenceId if provided.
-    */
-
-    if (referenceId && !isValidUUID(referenceId)) {
-      return res.status(400).json({
-        message: "Invalid reference ID",
-      });
-    }
-
-    let totalDebit = 0n;
-    let totalCredit = 0n;
-
-    const normalizedEntries = [];
-
-    for (const entry of entries) {
-      const {
-        accountId,
-        debit = "0",
-        credit = "0",
-        description: entryDescription,
-      } = entry;
-
-      if (!accountId) {
-        return res.status(400).json({
-          message: "Every ledger entry must have an accountId",
-        });
-      }
-
-      if (!isValidUUID(accountId)) {
-        return res.status(400).json({
-          message: `Invalid account ID: ${accountId}`,
-        });
-      }
-
-      const debitCents = parseAmount(debit);
-      const creditCents = parseAmount(credit);
-
-      if (debitCents === null || creditCents === null) {
-        return res.status(400).json({
-          message:
-            "Debit and credit must be valid numbers with at most 2 decimal places",
-        });
-      }
-
-      /*
-        One ledger entry cannot have both debit and credit.
-      */
-
-      if (debitCents > 0n && creditCents > 0n) {
-        return res.status(400).json({
-          message:
-            "A ledger entry cannot have both debit and credit",
-        });
-      }
-
-      /*
-        An entry with zero debit AND zero credit is useless.
-      */
-
-      if (debitCents === 0n && creditCents === 0n) {
-        return res.status(400).json({
-          message:
-            "A ledger entry must contain either a debit or a credit",
-        });
-      }
-
-      totalDebit += debitCents;
-      totalCredit += creditCents;
-
-      normalizedEntries.push({
-        accountId,
-        debit: normalizeAmount(debit),
-        credit: normalizeAmount(credit),
-        description: entryDescription || null,
-      });
-    }
-
-    /*
-      Double-entry accounting rule:
-      Debit must equal Credit.
-    */
-
-    if (totalDebit !== totalCredit) {
-      return res.status(400).json({
-        message:
-          "Transaction is not balanced: total debit must equal total credit",
-      });
-    }
-
-    /*
-      Make sure all referenced accounts belong
-      to this team.
-    */
-
-    const accountIds = [
-      ...new Set(
-        normalizedEntries.map((entry) => entry.accountId)
-      ),
-    ];
-
-    const accounts = await prisma.account.findMany({
-      where: {
-        id: {
-          in: accountIds,
-        },
-        teamId,
-      },
-
-      select: {
-        id: true,
-        accountType: true,
-        ownerUserId: true,
-      },
-    });
-
-    if (accounts.length !== accountIds.length) {
-      return res.status(400).json({
-        message:
-          "One or more accounts do not belong to this team",
-      });
-    }
-
-    /*
-      A user cannot post directly to another person's
-      reimbursement account.
-    */
-
-    for (const account of accounts) {
-      if (
-        account.accountType === "reimbursement" &&
-        account.ownerUserId !== userId
-      ) {
-        return res.status(403).json({
-          message:
-            "You cannot use another member's reimbursement account",
-        });
-      }
-    }
-
-    /*
-      Create transaction + ledger entries + audit log
-      atomically.
-    */
-
-    const transaction = await prisma.$transaction(
-      async (tx) => {
-        const newTransaction =
-          await tx.transaction.create({
-            data: {
-              teamId,
-              createdById: userId,
-              transactionType,
-              description: description || null,
-              referenceId: referenceId || null,
-
-              ledgerEntries: {
-                create: normalizedEntries,
-              },
-            },
-
-            select: {
-              id: true,
-              teamId: true,
-              createdById: true,
-              transactionType: true,
-              description: true,
-              referenceId: true,
-              createdAt: true,
-
-              ledgerEntries: {
-                select: {
-                  id: true,
-                  accountId: true,
-                  debit: true,
-                  credit: true,
-                  description: true,
-
-                  account: {
-                    select: {
-                      id: true,
-                      name: true,
-                      accountType: true,
-                    },
-                  },
-                },
-              },
-            },
-          });
-
-        /*
-          Record the action.
-        */
-
-        await tx.auditLog.create({
-          data: {
-            userId,
-            entityType: "transaction",
-            entityId: newTransaction.id,
-            action: "create",
-
-            newValue: {
-              transactionType,
-              description: description || null,
-              referenceId: referenceId || null,
-              entries: normalizedEntries,
-            },
-          },
-        });
-
-        return newTransaction;
-      }
+  if (!userId) {
+    throw new ApiError(
+      statusType.UNAUTHORIZED,
+      "Unauthorized"
     );
+  }
 
-    return res.status(201).json({
-      message: "Transaction created successfully",
-      transaction,
-    });
+  if (!teamId || !transactionType || !entries) {
+    throw new ApiError(
+      statusType.BAD_REQUEST,
+      "Team ID, transaction type and entries are required."
+    );
+  }
 
-  } catch (error) {
-    console.error("createTransaction:", error);
+  if (!Array.isArray(entries) || entries.length < 2) {
+    throw new ApiError(
+      statusType.BAD_REQUEST,
+      "A transaction must contain at least two ledger entries."
+    );
+  }
 
-    return res.status(500).json({
-      message: "Failed to create transaction",
+  const team = await prisma.team.findUnique({
+    where: {
+      id: teamId,
+    },
+    select: {
+      id: true,
+      organizationId: true,
+    },
+  });
+
+  if (!team) {
+    throw new ApiError(
+      statusType.NOT_FOUND,
+      "Team not found."
+    );
+  }
+
+  const teamMember = await prisma.teamMember.findUnique({
+    where: {
+      teamId_userId: {
+        teamId,
+        userId,
+      },
+    },
+    select: {
+      id: true,
+      role: true,
+    },
+  });
+
+  if (!teamMember) {
+    throw new ApiError(
+      statusType.FORBIDDEN,
+      "You are not a member of this team."
+    );
+  }
+
+  let totalDebit = 0n;
+  let totalCredit = 0n;
+
+  const normalizedEntries = [];
+
+  for (const entry of entries) {
+    const {
+      accountId,
+      debit = "0",
+      credit = "0",
+      description: entryDescription,
+    } = entry;
+
+    if (!accountId) {
+      throw new ApiError(
+        statusType.BAD_REQUEST,
+        "Every ledger entry must have an accountId."
+      );
+    }
+
+    if (!isValidUUID(accountId)) {
+      throw new ApiError(
+        statusType.BAD_REQUEST,
+        `Invalid account ID: ${accountId}`
+      );
+    }
+
+    const debitCents = parseAmount(debit);
+    const creditCents = parseAmount(credit);
+
+    if (debitCents === null || creditCents === null) {
+      throw new ApiError(
+        statusType.BAD_REQUEST,
+        "Debit and credit must be valid numbers with at most 2 decimal places."
+      );
+    }
+
+    if (debitCents > 0n && creditCents > 0n) {
+      throw new ApiError(
+        statusType.BAD_REQUEST,
+        "A ledger entry cannot have both debit and credit."
+      );
+    }
+
+    if (debitCents === 0n && creditCents === 0n) {
+      throw new ApiError(
+        statusType.BAD_REQUEST,
+        "A ledger entry must contain either a debit or a credit."
+      );
+    }
+
+    totalDebit += debitCents;
+    totalCredit += creditCents;
+
+    normalizedEntries.push({
+      accountId,
+      debit: normalizeAmount(debit),
+      credit: normalizeAmount(credit),
+      description: entryDescription || null,
     });
   }
-};
 
+  if (totalDebit !== totalCredit) {
+    throw new ApiError(
+      statusType.BAD_REQUEST,
+      "Transaction is not balanced: total debit must equal total credit."
+    );
+  }
 
-/* =========================================================
-   2. GET ALL TRANSACTIONS FOR A TEAM
-   ========================================================= */
+  const accountIds = [
+    ...new Set(
+      normalizedEntries.map((entry) => entry.accountId)
+    ),
+  ];
+
+  const accounts = await prisma.account.findMany({
+    where: {
+      id: {
+        in: accountIds,
+      },
+      organizationId: team.organizationId,
+
+      OR: [
+        {
+          teamId: teamId,
+        },
+        {
+          teamId: null,
+        },
+      ],
+    },
+    select: {
+      id: true,
+      teamId: true,
+      accountType: true,
+      name: true,
+    },
+  });
+
+  if (accounts.length !== accountIds.length) {
+    throw new ApiError(
+      statusType.BAD_REQUEST,
+      "One or more accounts do not belong to this team or organization."
+    );
+  }
+
+  const transaction = await prisma.$transaction(async (tx) => {
+    const newTransaction = await tx.transaction.create({
+      data: {
+        organizationId: team.organizationId,
+        teamId,
+        createdById: userId,
+        transactionType,
+        description: description || null,
+        referenceId: referenceId || null,
+
+        ledgerEntries: {
+          create: normalizedEntries,
+        },
+      },
+      include: {
+        ledgerEntries: {
+          include: {
+            account: {
+              select: {
+                id: true,
+                name: true,
+                accountType: true,
+                teamId: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        userId,
+        entityType: "transaction",
+        entityId: newTransaction.id,
+        action: "create",
+        newValue: {
+          transactionType,
+          description: description || null,
+          referenceId: referenceId || null,
+          entries: normalizedEntries,
+        },
+      },
+    });
+
+    return newTransaction;
+  });
+
+  return sendResponse(
+    res,
+    "success",
+    transaction,
+    "Transaction created successfully.",
+    statusType.CREATED
+  );
+});
 
 const getAllTransactions = async (req, res) => {
   try {
@@ -460,11 +406,6 @@ const getAllTransactions = async (req, res) => {
     });
   }
 };
-
-
-/* =========================================================
-   3. GET ONE TRANSACTION
-   ========================================================= */
 
 const getTransaction = async (req, res) => {
   try {
@@ -557,11 +498,6 @@ const getTransaction = async (req, res) => {
     });
   }
 };
-
-
-/* =========================================================
-   4. GET CURRENT USER'S TRANSACTIONS
-   ========================================================= */
 
 const getMyTransactions = async (req, res) => {
   try {

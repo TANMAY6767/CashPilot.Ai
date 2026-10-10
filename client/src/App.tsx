@@ -6,6 +6,7 @@ import LoginPage from '@/pages/LoginPage';
 import SignupPage from '@/pages/SignupPage';
 import AcceptInvitationPage from '@/pages/AcceptInvitationPage'; // ← new
 import TeamsPage from '@/pages/TeamsPage';
+import TeamDetailPage from '@/pages/TeamDetailPage';
 import OrganizationPage from '@/pages/Organization/OrganizationPage';
 import OrganizationOverview from '@/pages/Organization/OrganizationOverview';
 import DashboardPage from '@/pages/DashboardPage';
@@ -41,6 +42,7 @@ export default function App() {
             <Route path="profile" element={<ProfilePage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="teams" element={<TeamsPage />} />
+            <Route path="teams/:teamId" element={<TeamDetailPage />} />
             <Route path="expenses" element={<TransactionPage />} />
             <Route path="organization" element={<OrganizationPage />} />
             <Route

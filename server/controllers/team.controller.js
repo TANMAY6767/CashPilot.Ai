@@ -2,21 +2,11 @@ import prisma from "../prisma/client.js";
 import { ApiError } from "../utils/ApiError.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendResponse, statusType } from "../utils/index.js";
-import { sendEmail } from "../services/email.service.js";
-import crypto from "crypto";
-
 const getUserId = (req) => req.user?.sub;
 
 
-
-
-/* =========================================================
-   GET ALL TEAMS OF AN ORGANIZATION
-   ========================================================= */
-
-
 const getAllTeams = asyncHandler(async (req, res) => {
-  
+
   const userId = getUserId(req);
   const { orgId } = req.params;
 
@@ -28,9 +18,16 @@ const getAllTeams = asyncHandler(async (req, res) => {
     throw new ApiError(statusType.BAD_REQUEST, "Organization ID is required.");
   }
 
+  const organizationMembership = await prisma.organizationMember.findUnique({
+    where: { organizationId_userId: { organizationId: orgId, userId } },
+    select: { role: true },
+  });
+  if (!organizationMembership) throw new ApiError(statusType.FORBIDDEN, "You are not a member of this organization.");
+
   const teams = await prisma.team.findMany({
     where: {
-      organizationId:orgId
+      organizationId: orgId,
+      ...(organizationMembership.role === "owner" ? {} : { members: { some: { userId } } }),
     },
     orderBy: { createdAt: "desc" },
 
@@ -55,10 +52,10 @@ const getAllTeams = asyncHandler(async (req, res) => {
           role: true,
         },
       },
-      budget:{
-        select:{
-          totalBudget:true,
-          currency:true
+      budget: {
+        select: {
+          totalBudget: true,
+          currency: true
         }
       }
     },
@@ -74,10 +71,6 @@ const getAllTeams = asyncHandler(async (req, res) => {
 
 });
 
-/* =========================================================
-   GET ONE TEAM
-   ========================================================= */
-
 const getOneTeam = asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   const { teamId } = req.params;
@@ -89,19 +82,17 @@ const getOneTeam = asyncHandler(async (req, res) => {
     throw new ApiError(statusType.BAD_REQUEST, "Team ID is required.");
   }
 
-  /*
-    Find the team only if the logged-in user belongs to its
-    organization. This doubles as the membership check — no
-    separate query needed.
-  */
+  const organizationMembership = await prisma.organizationMember.findUnique({
+    where: { organizationId_userId: { organizationId: req.params.orgId, userId } },
+    select: { role: true },
+  });
+  if (!organizationMembership) throw new ApiError(statusType.FORBIDDEN, "You are not a member of this organization.");
+
   const team = await prisma.team.findFirst({
     where: {
       id: teamId,
-      organization: {
-        members: {
-          some: { userId },
-        },
-      },
+      organizationId: req.params.orgId,
+      ...(organizationMembership.role === "owner" ? {} : { members: { some: { userId } } }),
     },
 
     select: {
@@ -177,130 +168,78 @@ const getOneTeam = asyncHandler(async (req, res) => {
   );
 });
 
-
-/* =========================================================
-   CREATE TEAM
-   ========================================================= */
-
 const createTeam = asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   const { orgId } = req.params;
   const name = req.body.name?.trim();
 
   if (!userId) {
-    throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized");
+    throw new ApiError(
+      statusType.UNAUTHORIZED,
+      "Unauthorized"
+    );
   }
 
   if (!orgId || !name) {
-      return res.status(400).json({
-        message: "Organization ID and team name are required",
-      });
-    }
+    throw new ApiError(
+      statusType.BAD_REQUEST,
+      "Organization ID and team name are required."
+    );
+  }
 
   const orgMember = await prisma.organizationMember.findUnique({
-      where: {
-        organizationId_userId: {
-          organizationId: orgId,
-          userId,
-        },
+    where: {
+      organizationId_userId: {
+        organizationId: orgId,
+        userId,
       },
-    });
+    },
+    select: {
+      id: true,
+      role: true,
+    },
+  });
 
-    if (!orgMember) {
-      throw new ApiError(
+  if (!orgMember) {
+    throw new ApiError(
       statusType.FORBIDDEN,
       "You are not a member of this organization."
     );
-    }
+  }
 
-  const existingTeam = await prisma.team.findFirst({
+  const existingTeam = await prisma.team.findUnique({
     where: {
-      name,
-      createdById: userId,
+      organizationId_name: {
+        organizationId: orgId,
+        name,
+      },
+    },
+    select: {
+      id: true,
     },
   });
 
   if (existingTeam) {
     throw new ApiError(
       statusType.CONFLICT,
-      "You already have an organization with this name."
+      "A team with this name already exists in this organization."
     );
   }
 
-  const newTeam = await prisma.team.create({
-        data: {
-          name,
-          organizationId: orgId,
-          createdById: userId,
-
-          members: {
-            create: {
-              userId,
-              role: "owner",
-            },
-          },
-        },
-  });
-
-
-  return sendResponse(
-    res,
-    "success",
-    newTeam,
-    "newTeam created successfully",
-    statusType.OK
-  )
-});
-
-
-/* =========================================================
-   UPDATE TEAM
-   ========================================================= */
-
-const updateTeam = async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const { teamId } = req.params;
-    const name = req.body.name?.trim();
-
-    if (!userId) {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
-    }
-
-    if (!name) {
-      return res.status(400).json({
-        message: "Team name is required",
-      });
-    }
-
-    /*
-      Only the team creator can update the team.
-    */
-
-    const team = await prisma.team.findFirst({
-      where: {
-        id: teamId,
-        createdById: userId,
-      },
-    });
-
-    if (!team) {
-      return res.status(404).json({
-        message: "Team not found or you are not the team creator",
-      });
-    }
-
-    const updatedTeam = await prisma.team.update({
-      where: {
-        id: teamId,
-      },
-
+  const result = await prisma.$transaction(async (tx) => {
+    const team = await tx.team.create({
       data: {
         name,
-      },
+        organizationId: orgId,
+        createdById: userId,
 
+        members: {
+          create: {
+            userId,
+            role: "owner",
+          },
+        },
+      },
       select: {
         id: true,
         name: true,
@@ -308,652 +247,1205 @@ const updateTeam = async (req, res) => {
         createdById: true,
         createdAt: true,
         updatedAt: true,
-      },
-    });
 
-    return res.status(200).json({
-      message: "Team updated successfully",
-      team: updatedTeam,
-    });
-
-  } catch (error) {
-    console.error("updateTeam:", error);
-
-    return res.status(500).json({
-      message: "Failed to update team",
-    });
-  }
-};
-
-
-/* =========================================================
-   DELETE TEAM
-   ========================================================= */
-
-const deleteTeam = async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const { teamId } = req.params;
-
-    if (!userId) {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
-    }
-
-    /*
-      Only team creator can delete.
-    */
-
-    const team = await prisma.team.findFirst({
-      where: {
-        id: teamId,
-        createdById: userId,
-      },
-    });
-
-    if (!team) {
-      return res.status(404).json({
-        message: "Team not found or you are not the team creator",
-      });
-    }
-
-    await prisma.team.delete({
-      where: {
-        id: teamId,
-      },
-    });
-
-    /*
-      Because Team relations use onDelete: Cascade,
-      these related records will cascade:
-
-      TeamMember
-      Budget
-      Account
-      Transaction
-      TeamInvitation
-    */
-
-    return res.status(200).json({
-      message: "Team deleted successfully",
-    });
-
-  } catch (error) {
-    console.error("deleteTeam:", error);
-
-    return res.status(500).json({
-      message: "Failed to delete team",
-    });
-  }
-};
-
-
-/* =========================================================
-   GET TEAM MEMBERS
-   ========================================================= */
-
-const getTeamMembers = async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const { teamId } = req.params;
-
-    if (!userId) {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
-    }
-
-    /*
-      User must belong to the team.
-    */
-
-    const requester = await prisma.teamMember.findUnique({
-      where: {
-        teamId_userId: {
-          teamId,
-          userId,
-        },
-      },
-    });
-
-    if (!requester) {
-      return res.status(403).json({
-        message: "You are not a member of this team",
-      });
-    }
-
-    const members = await prisma.teamMember.findMany({
-      where: {
-        teamId,
-      },
-
-      orderBy: {
-        joinedAt: "asc",
-      },
-
-      select: {
-        id: true,
-        userId: true,
-        role: true,
-        joinedAt: true,
-
-        user: {
+        members: {
           select: {
             id: true,
-            name: true,
-            email: true,
+            userId: true,
+            role: true,
+            joinedAt: true,
           },
         },
       },
     });
 
-    return res.status(200).json({
-      message: "Team members fetched successfully",
-      members,
-    });
-
-  } catch (error) {
-    console.error("getTeamMembers:", error);
-
-    return res.status(500).json({
-      message: "Failed to get team members",
-    });
-  }
-};
-
-
-/* =========================================================
-   SEND TEAM INVITATION
-   ========================================================= */
-
-const sendTeamInvitationEmail = async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const { teamId } = req.params;
-
-    const email = req.body.email?.trim().toLowerCase();
-    const role = req.body.role || "member";
-
-    if (!userId) {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
-    }
-
-    if (!email) {
-      return res.status(400).json({
-        message: "Email is required",
-      });
-    }
-
-    if (!["member", "admin"].includes(role)) {
-      return res.status(400).json({
-        message: "Invalid team role",
-      });
-    }
-
-    /*
-      Get team.
-    */
-
-    const team = await prisma.team.findUnique({
-      where: {
-        id: teamId,
+    const expenseAccount = await tx.account.create({
+      data: {
+        organizationId: orgId,
+        teamId: team.id,
+        accountType: "expense",
+        name: `${name} Expense Account`.slice(0, 100),
       },
-
       select: {
         id: true,
         name: true,
-        createdById: true,
+        accountType: true,
+        teamId: true,
+      },
+    });
+
+    return {
+      team,
+      expenseAccount,
+    };
+  });
+
+  return sendResponse(
+    res,
+    "success",
+    result,
+    "Team created successfully.",
+    statusType.CREATED
+  );
+});
+
+const updateTeam = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { orgId, teamId } = req.params;
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+
+  if (!userId) throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized.");
+  if (!orgId || !teamId) throw new ApiError(statusType.BAD_REQUEST, "Organization and team IDs are required.");
+  if (!name) throw new ApiError(statusType.BAD_REQUEST, "Team name is required.");
+
+  const team = await prisma.team.findFirst({
+    where: { id: teamId, organizationId: orgId, createdById: userId },
+  });
+  if (!team) throw new ApiError(statusType.FORBIDDEN, "Only the team creator can update this team.");
+
+  const updatedTeam = await prisma.team.update({
+    where: { id: teamId },
+    data: { name },
+    select: {
+      id: true,
+      name: true,
+      organizationId: true,
+      createdById: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  return sendResponse(res, "success", updatedTeam, "Team updated successfully.", statusType.OK);
+});
+
+const deleteTeam = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { orgId, teamId } = req.params;
+
+  if (!userId) throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized.");
+  if (!orgId || !teamId) throw new ApiError(statusType.BAD_REQUEST, "Organization and team IDs are required.");
+
+  const team = await prisma.team.findFirst({
+    where: { id: teamId, organizationId: orgId, createdById: userId },
+    select: { id: true },
+  });
+  if (!team) throw new ApiError(statusType.FORBIDDEN, "Only the team creator can delete this team.");
+
+  await prisma.team.delete({ where: { id: teamId } });
+  return sendResponse(res, "success", null, "Team deleted successfully.", statusType.OK);
+});
+
+const getTeamMembers = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { teamId } = req.params;
+
+  if (!userId) throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized.");
+  if (!teamId) throw new ApiError(statusType.BAD_REQUEST, "Team ID is required.");
+
+  const team = await prisma.team.findFirst({
+    where: {
+      id: teamId,
+      OR: [
+        { members: { some: { userId } } },
+        { organization: { members: { some: { userId, role: "owner" } } } },
+      ],
+    },
+    select: { id: true },
+  });
+  if (!team) throw new ApiError(statusType.FORBIDDEN, "You do not have access to this team.");
+
+  const members = await prisma.teamMember.findMany({
+    where: { teamId },
+    orderBy: { joinedAt: "asc" },
+    select: {
+      id: true,
+      userId: true,
+      role: true,
+      joinedAt: true,
+      user: { select: { id: true, name: true, email: true } },
+    },
+  });
+
+  return sendResponse(res, "success", members, "Team members fetched successfully.", statusType.OK);
+});
+
+const addTeamMember = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { teamId } = req.params;
+  const memberUserId = req.body?.userId;
+  const requestedRole = req.body?.role ?? "member";
+
+  if (!userId) throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized.");
+  if (!teamId || !memberUserId) throw new ApiError(statusType.BAD_REQUEST, "Team and organization member are required.");
+  if (!['member', 'admin'].includes(requestedRole)) throw new ApiError(statusType.BAD_REQUEST, "Invalid team role.");
+
+  const team = await prisma.team.findFirst({
+    where: { id: teamId, createdById: userId },
+    select: { id: true, organizationId: true },
+  });
+  if (!team) throw new ApiError(statusType.FORBIDDEN, "Only the team creator can add members.");
+
+  const organizationMember = await prisma.organizationMember.findUnique({
+    where: { organizationId_userId: { organizationId: team.organizationId, userId: memberUserId } },
+    select: { userId: true },
+  });
+  if (!organizationMember) throw new ApiError(statusType.BAD_REQUEST, "Add this person to the organization before adding them to a team.");
+
+  const existingMember = await prisma.teamMember.findUnique({
+    where: { teamId_userId: { teamId, userId: memberUserId } },
+    select: { id: true },
+  });
+  if (existingMember) throw new ApiError(statusType.CONFLICT, "User is already a member of this team.");
+
+  const member = await prisma.teamMember.create({
+    data: { teamId, userId: memberUserId, role: requestedRole },
+    select: {
+      id: true,
+      userId: true,
+      role: true,
+      joinedAt: true,
+      user: { select: { id: true, name: true, email: true } },
+    },
+  });
+
+  return sendResponse(res, "success", member, "Team member added successfully.", statusType.OK);
+});
+
+const sendTeamInvitationEmail = asyncHandler(async (req, res) => {
+  if (!getUserId(req)) throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized.");
+  throw new ApiError(
+    statusType.BAD_REQUEST,
+    "Team email invitations are unavailable in the current database schema. Invite the person to the organization first, then add them to this team."
+  );
+});
+
+const acceptInvitation = asyncHandler(async (req, res) => {
+  if (!getUserId(req)) throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized.");
+  throw new ApiError(
+    statusType.BAD_REQUEST,
+    "Team email invitations are unavailable in the current database schema. Ask the organization owner to add you to the team after you join the organization."
+  );
+});
+
+const updateTeamMemberRole = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { teamId, memberUserId } = req.params;
+  const { role } = req.body ?? {};
+
+  if (!userId) throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized.");
+  if (!teamId || !memberUserId) throw new ApiError(statusType.BAD_REQUEST, "Team and member IDs are required.");
+  if (!["member", "admin"].includes(role)) throw new ApiError(statusType.BAD_REQUEST, "Invalid team role.");
+
+  const team = await prisma.team.findFirst({
+    where: { id: teamId, createdById: userId },
+    select: { id: true, createdById: true },
+  });
+  if (!team) throw new ApiError(statusType.FORBIDDEN, "Only the team creator can change member roles.");
+  if (memberUserId === team.createdById) throw new ApiError(statusType.BAD_REQUEST, "The team creator's role cannot be changed.");
+
+  const member = await prisma.teamMember.update({
+    where: { teamId_userId: { teamId, userId: memberUserId } },
+    data: { role },
+    select: {
+      id: true,
+      userId: true,
+      role: true,
+      joinedAt: true,
+      user: { select: { id: true, name: true, email: true } },
+    },
+  }).catch((error) => {
+    if (error.code === "P2025") throw new ApiError(statusType.NOT_FOUND, "Team member not found.");
+    throw error;
+  });
+
+  return sendResponse(res, "success", member, "Team member role updated successfully.", statusType.OK);
+});
+
+
+const removeTeamMember = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { teamId, memberUserId } = req.params;
+
+  if (!userId) throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized.");
+  if (!teamId || !memberUserId) throw new ApiError(statusType.BAD_REQUEST, "Team and member IDs are required.");
+
+  const team = await prisma.team.findFirst({
+    where: { id: teamId, createdById: userId },
+    select: { id: true, createdById: true },
+  });
+  if (!team) throw new ApiError(statusType.FORBIDDEN, "Only the team creator can remove members.");
+  if (memberUserId === team.createdById) throw new ApiError(statusType.BAD_REQUEST, "The team creator cannot be removed.");
+
+  await prisma.teamMember.delete({
+    where: { teamId_userId: { teamId, userId: memberUserId } },
+  }).catch((error) => {
+    if (error.code === "P2025") throw new ApiError(statusType.NOT_FOUND, "Team member not found.");
+    throw error;
+  });
+
+  return sendResponse(res, "success", null, "Team member removed successfully.", statusType.OK);
+});
+
+
+const createTeamExpenseTransaction = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { orgId, teamId } = req.params;
+  const { transactionType, amount, description } = req.body;
+
+  if (!userId) {
+    throw new ApiError(
+      statusType.UNAUTHORIZED,
+      "Unauthorized."
+    );
+  }
+
+  if (!orgId || !teamId) {
+    throw new ApiError(
+      statusType.BAD_REQUEST,
+      "Organization and team IDs are required."
+    );
+  }
+
+  if (
+    typeof transactionType !== "string" ||
+    transactionType.trim().toUpperCase() !== "EXPENSE"
+  ) {
+    throw new ApiError(
+      statusType.BAD_REQUEST,
+      "This endpoint only supports EXPENSE transactions."
+    );
+  }
+
+  // 4. Validate amount without converting it to a floating-point
+  // number for storage.
+  const amountString = String(amount ?? "").trim();
+
+  if (
+    !/^\d{1,12}(?:\.\d{1,2})?$/.test(amountString) ||
+    Number(amountString) <= 0
+  ) {
+    throw new ApiError(
+      statusType.BAD_REQUEST,
+      "Amount must be a positive value with at most two decimal places."
+    );
+  }
+
+  const cleanDescription =
+    typeof description === "string"
+      ? description.trim()
+      : "";
+
+  // 5. Verify that the team belongs to the organization
+  const team = await prisma.team.findFirst({
+    where: {
+      id: teamId,
+      organizationId: orgId,
+    },
+    select: {
+      id: true,
+      organizationId: true,
+    },
+  });
+
+  if (!team) {
+    throw new ApiError(
+      statusType.BAD_REQUEST,
+      "Team or organization is invalid."
+    );
+  }
+
+  // 6. Verify organization membership
+  const organizationMembership =
+    await prisma.organizationMember.findUnique({
+      where: {
+        organizationId_userId: {
+          organizationId: orgId,
+          userId,
+        },
+      },
+      select: {
+        role: true,
+      },
+    });
+
+  if (!organizationMembership) {
+    throw new ApiError(
+      statusType.FORBIDDEN,
+      "You are not a member of this organization."
+    );
+  }
+
+  // 7. Verify team membership
+  // Your Prisma schema defines @@unique([teamId, userId]),
+  // so the correct compound key is teamId_userId.
+  const teamMembership = await prisma.teamMember.findUnique({
+    where: {
+      teamId_userId: {
+        teamId,
+        userId,
+      },
+    },
+    select: {
+      role: true,
+    },
+  });
+
+  if (!teamMembership) {
+    throw new ApiError(
+      statusType.FORBIDDEN,
+      "You are not a member of this team."
+    );
+  }
+
+  // 8. Create the transaction and both ledger entries atomically
+  const result = await prisma.$transaction(async (tx) => {
+    // Find the team's existing Expense Account
+    const expenseAccount = await tx.account.findFirst({
+      where: {
+        organizationId: orgId,
+        teamId,
+        accountType: "expense",
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
+    if (!expenseAccount) {
+      throw new ApiError(
+        statusType.BAD_REQUEST,
+        "The team's Expense Account was not found."
+      );
+    }
+
+    // Find the organization's existing Financial Cash Account.
+    // Update this name to match the value stored in your database.
+    const cashAccount = await tx.account.findFirst({
+      where: {
+        organizationId: orgId,
+        teamId: null,
+        accountType: "asset",
+        name: {
+          equals: "Financial Cash Account",
+          mode: "insensitive",
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
+    if (!cashAccount) {
+      throw new ApiError(
+        statusType.BAD_REQUEST,
+        "The organization's Financial Cash Account was not found."
+      );
+    }
+
+    // Debit Expense; credit Cash.
+    // Nested creation ensures the transaction and both entries
+    // are committed or rolled back together.
+    const transaction = await tx.transaction.create({
+      data: {
+        organizationId: orgId,
+        teamId,
+        createdById: userId,
+        transactionType: "EXPENSE",
+        description: cleanDescription || null,
+
+        ledgerEntries: {
+          create: [
+            {
+              accountId: expenseAccount.id,
+              debit: amountString,
+              credit: "0",
+              description: cleanDescription || null,
+            },
+            {
+              accountId: cashAccount.id,
+              debit: "0",
+              credit: amountString,
+              description: cleanDescription || null,
+            },
+          ],
+        },
+      },
+      select: {
+        id: true,
         organizationId: true,
+        teamId: true,
+        createdById: true,
+        transactionType: true,
+        description: true,
+        createdAt: true,
+
+        ledgerEntries: {
+          select: {
+            id: true,
+            debit: true,
+            credit: true,
+            description: true,
+            account: {
+              select: {
+                id: true,
+                name: true,
+                accountType: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return transaction;
+  });
+
+  return res.status(201).json({
+    success: true,
+    message: "Team expense recorded successfully.",
+    data: result,
+  });
+});
+
+const createReimbursementClaim = asyncHandler(
+  async (req, res) => {
+    const userId = getUserId(req);
+    const { orgId, teamId } = req.params;
+    const { amount, description } = req.body;
+
+    // 1. Authentication
+    if (!userId) {
+      throw new ApiError(
+        statusType.UNAUTHORIZED,
+        "Unauthorized."
+      );
+    }
+
+    if (!orgId || !teamId) {
+      throw new ApiError(
+        statusType.BAD_REQUEST,
+        "Organization and team IDs are required."
+      );
+    }
+
+    // 2. Validate amount for Decimal(12, 2)
+    const amountText = String(amount ?? "").trim();
+
+    if (
+      !/^\d{1,10}(?:\.\d{1,2})?$/.test(amountText) ||
+      !Number.isFinite(Number(amountText)) ||
+      Number(amountText) <= 0
+    ) {
+      throw new ApiError(
+        statusType.BAD_REQUEST,
+        "Amount must be positive and have at most two decimal places."
+      );
+    }
+
+    if (
+      description !== undefined &&
+      description !== null &&
+      typeof description !== "string"
+    ) {
+      throw new ApiError(
+        statusType.BAD_REQUEST,
+        "Description must be a string."
+      );
+    }
+
+    const cleanDescription = description?.trim() || null;
+
+    if (cleanDescription && cleanDescription.length > 500) {
+      throw new ApiError(
+        statusType.BAD_REQUEST,
+        "Description cannot exceed 500 characters."
+      );
+    }
+
+    // 3. Verify that the team belongs to this organization
+    const team = await prisma.team.findFirst({
+      where: {
+        id: teamId,
+        organizationId: orgId,
+      },
+      select: {
+        id: true,
       },
     });
 
     if (!team) {
-      return res.status(404).json({
-        message: "Team not found",
-      });
+      throw new ApiError(
+        statusType.BAD_REQUEST,
+        "Team or organization is invalid."
+      );
     }
 
-    /*
-      Only team creator can send invitations.
-    */
-
-    if (team.createdById !== userId) {
-      return res.status(403).json({
-        message: "Only the team creator can invite members",
+    // 4. Verify organization membership
+    const organizationMembership =
+      await prisma.organizationMember.findUnique({
+        where: {
+          organizationId_userId: {
+            organizationId: orgId,
+            userId,
+          },
+        },
+        select: {
+          id: true,
+        },
       });
+
+    if (!organizationMembership) {
+      throw new ApiError(
+        statusType.FORBIDDEN,
+        "You are not a member of this organization."
+      );
     }
 
-    /*
-      Check if invited email belongs to an existing user.
-    */
-
-    const existingUser = await prisma.user.findUnique({
+    // 5. Verify team membership
+    const teamMembership = await prisma.teamMember.findUnique({
       where: {
-        email,
+        teamId_userId: {
+          teamId,
+          userId,
+        },
+      },
+      select: {
+        id: true,
       },
     });
 
-    if (existingUser) {
-      const existingMember = await prisma.teamMember.findUnique({
+    if (!teamMembership) {
+      throw new ApiError(
+        statusType.FORBIDDEN,
+        "You are not a member of this team."
+      );
+    }
+
+    // 6. Create claim and accounting entries atomically
+    const result = await prisma.$transaction(async (tx) => {
+      // Find the team's existing Expense Account
+      const expenseAccount = await tx.account.findFirst({
         where: {
-          teamId_userId: {
-            teamId,
-            userId: existingUser.id,
+          organizationId: orgId,
+          teamId,
+          accountType: "expense",
+        },
+        select: {
+          id: true,
+          name: true,
+        },
+      });
+
+      // Find the organization's Employee Payable Account
+      const payableAccount = await tx.account.findFirst({
+        where: {
+          organizationId: orgId,
+          teamId: null,
+          accountType: "liability",
+          name: "Employee Payable Account",
+        },
+        select: {
+          id: true,
+          name: true,
+        },
+      });
+
+      if (!expenseAccount || !payableAccount) {
+        throw new ApiError(
+          statusType.BAD_REQUEST,
+          "Required Expense or Employee Payable Account was not found."
+        );
+      }
+
+      // Create reimbursement claim
+      const claim = await tx.reimbursementClaim.create({
+        data: {
+          organizationId: orgId,
+          employeeId: userId,
+          teamId,
+          amount: amountText,
+          description: cleanDescription,
+          status: "PENDING",
+        },
+        select: {
+          id: true,
+          organizationId: true,
+          employeeId: true,
+          teamId: true,
+          amount: true,
+          description: true,
+          status: true,
+          createdAt: true,
+        },
+      });
+
+      // Record:
+      // Debit  -> Team Expense
+      // Credit -> Employee Payable
+      const transaction = await tx.transaction.create({
+        data: {
+          organizationId: orgId,
+          teamId,
+          createdById: userId,
+          transactionType: "REIMBURSEMENT_CLAIM",
+          description:
+            cleanDescription || "Employee reimbursement claim",
+          referenceId: claim.id,
+
+          ledgerEntries: {
+            create: [
+              {
+                accountId: expenseAccount.id,
+                debit: amountText,
+                credit: "0",
+                description: cleanDescription,
+              },
+              {
+                accountId: payableAccount.id,
+                debit: "0",
+                credit: amountText,
+                description: cleanDescription,
+              },
+            ],
+          },
+        },
+        select: {
+          id: true,
+          transactionType: true,
+          referenceId: true,
+          createdAt: true,
+          ledgerEntries: {
+            select: {
+              accountId: true,
+              debit: true,
+              credit: true,
+            },
           },
         },
       });
 
-      if (existingMember) {
-        return res.status(409).json({
-          message: "User is already a team member",
-        });
-      }
-    }
-
-    /*
-      Check for pending invitation.
-    */
-
-    const existingInvitation = await prisma.teamInvitation.findFirst({
-      where: {
-        teamId,
-        email,
-        status: "pending",
-      },
-    });
-
-    if (existingInvitation) {
-      return res.status(409).json({
-        message: "Invitation already sent",
-      });
-    }
-
-    /*
-      Create secure invitation token.
-    */
-
-    const token = crypto.randomBytes(32).toString("hex");
-
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
-
-    const invitation = await prisma.teamInvitation.create({
-      data: {
-        teamId,
-        email,
-        invitedById: userId,
-        role,
-        token,
-        expiresAt,
-      },
-
-      include: {
-        team: true,
-        invitedBy: true,
-      },
-    });
-
-    /*
-      Send email.
-    */
-
-    await sendEmail({
-      email,
-      teamName: invitation.team.name,
-      inviterName: invitation.invitedBy.name,
-      token,
+      return {
+        claim,
+        transaction,
+      };
     });
 
     return res.status(201).json({
-      message: "Invitation sent successfully",
-    });
-
-  } catch (error) {
-    console.error("sendTeamInvitationEmail:", error);
-
-    return res.status(500).json({
-      message: "Failed to send invitation",
+      success: true,
+      message: "Reimbursement claim submitted successfully.",
+      data: result,
     });
   }
-};
+);
 
-
-/* =========================================================
-   ACCEPT TEAM INVITATION
-   ========================================================= */
-
-const acceptInvitation = async (req, res) => {
-  try {
+const payReimbursementClaim = asyncHandler(
+  async (req, res) => {
     const userId = getUserId(req);
-    const { token } = req.params;
+    const { orgId, claimId } = req.params;
 
+    // 1. Authentication
     if (!userId) {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
+      throw new ApiError(
+        statusType.UNAUTHORIZED,
+        "Unauthorized."
+      );
     }
 
-    const invitation = await prisma.teamInvitation.findUnique({
+    if (!orgId || !claimId) {
+      throw new ApiError(
+        statusType.BAD_REQUEST,
+        "Organization ID and claim ID are required."
+      );
+    }
+
+    // 2. Verify that the authenticated user is the organization owner.
+    // In your current schema, createdById represents the owner.
+    const organization = await prisma.organization.findUnique({
       where: {
-        token,
+        id: orgId,
       },
-    });
-
-    if (!invitation) {
-      return res.status(404).json({
-        message: "Invitation not found",
-      });
-    }
-
-    if (invitation.status !== "pending") {
-      return res.status(400).json({
-        message: "Invitation is no longer valid",
-      });
-    }
-
-    /*
-      Check expiry.
-    */
-
-    if (invitation.expiresAt < new Date()) {
-      await prisma.teamInvitation.update({
-        where: {
-          id: invitation.id,
-        },
-
-        data: {
-          status: "expired",
-        },
-      });
-
-      return res.status(400).json({
-        message: "Invitation has expired",
-      });
-    }
-
-    /*
-      Get current user.
-    */
-
-    const user = await prisma.user.findUnique({
-      where: {
-        id: userId,
-      },
-
       select: {
         id: true,
-        email: true,
+        createdById: true,
       },
     });
 
-    if (!user) {
-      return res.status(404).json({
-        message: "User not found",
-      });
+    if (!organization) {
+      throw new ApiError(
+        statusType.BAD_REQUEST,
+        "Organization not found."
+      );
     }
 
-    /*
-      Invitation can only be accepted by the
-      account that owns the invited email.
-    */
-
-    if (user.email.toLowerCase() !== invitation.email.toLowerCase()) {
-      return res.status(403).json({
-        message: "This invitation was sent to another email address",
-      });
+    if (organization.createdById !== userId) {
+      throw new ApiError(
+        statusType.FORBIDDEN,
+        "Only the organization owner can pay reimbursement claims."
+      );
     }
 
-    /*
-      Make sure user isn't already a member.
-    */
-
-    const existingMember = await prisma.teamMember.findUnique({
-      where: {
-        teamId_userId: {
-          teamId: invitation.teamId,
-          userId,
-        },
-      },
-    });
-
-    if (existingMember) {
-      return res.status(409).json({
-        message: "You are already a member of this team",
-      });
-    }
-
-    /*
-      Add member + mark invitation accepted
-      in ONE transaction.
-    */
-
-    await prisma.$transaction(async (tx) => {
-      await tx.teamMember.create({
-        data: {
-          teamId: invitation.teamId,
-          userId,
-          role: invitation.role,
-        },
-      });
-
-      await tx.teamInvitation.update({
+    // 3. Perform payout atomically
+    const result = await prisma.$transaction(async (tx) => {
+      // Fetch the claim from this organization
+      const claim = await tx.reimbursementClaim.findFirst({
         where: {
-          id: invitation.id,
+          id: claimId,
+          organizationId: orgId,
         },
+        select: {
+          id: true,
+          employeeId: true,
+          teamId: true,
+          amount: true,
+          description: true,
+          status: true,
+        },
+      });
 
+      if (!claim) {
+        throw new ApiError(
+          statusType.BAD_REQUEST,
+          "Reimbursement claim not found."
+        );
+      }
+
+      if (claim.status !== "APPROVED") {
+        throw new ApiError(
+          statusType.BAD_REQUEST,
+          "Only approved reimbursement claims can be paid."
+        );
+      }
+
+      // Find the organization's Employee Payable Account
+      const payableAccount = await tx.account.findFirst({
+        where: {
+          organizationId: orgId,
+          teamId: null,
+          accountType: "liability",
+          name: "Employee Payable Account",
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      // Find the organization's Financial Cash Account
+      const cashAccount = await tx.account.findFirst({
+        where: {
+          organizationId: orgId,
+          teamId: null,
+          accountType: "asset",
+          name: "Financial Cash Account",
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (!payableAccount || !cashAccount) {
+        throw new ApiError(
+          statusType.BAD_REQUEST,
+          "Required Employee Payable or Financial Cash Account was not found."
+        );
+      }
+
+      // Claim amount comes from the database, never from req.body.
+      const amount = claim.amount.toString();
+
+      // Atomically claim the right to pay this reimbursement.
+      // This prevents two concurrent requests from paying it twice.
+      const claimUpdate = await tx.reimbursementClaim.updateMany({
+        where: {
+          id: claim.id,
+          organizationId: orgId,
+          status: "APPROVED",
+        },
         data: {
-          status: "accepted",
+          status: "PAID",
         },
       });
-    });
 
-    return res.status(200).json({
-      message: "You have joined the team",
-    });
+      if (claimUpdate.count !== 1) {
+        throw new ApiError(
+          statusType.BAD_REQUEST,
+          "This claim has already been paid or is no longer payable."
+        );
+      }
 
-  } catch (error) {
-    console.error("acceptInvitation:", error);
+      // Record:
+      // Debit  -> Employee Payable (liability decreases)
+      // Credit -> Financial Cash (asset decreases)
+      const transaction = await tx.transaction.create({
+        data: {
+          organizationId: orgId,
+          teamId: claim.teamId,
+          createdById: userId,
+          transactionType: "REIMBURSEMENT_PAYMENT",
+          description: `Reimbursement payout: ${claim.description || claim.id
+            }`,
+          referenceId: claim.id,
 
-    return res.status(500).json({
-      message: "Failed to accept invitation",
-    });
-  }
-};
-
-
-/* =========================================================
-   UPDATE TEAM MEMBER ROLE
-   ========================================================= */
-
-const updateTeamMemberRole = async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const { teamId, memberUserId } = req.params;
-    const { role } = req.body;
-
-    if (!userId) {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
-    }
-
-    if (!["member", "admin"].includes(role)) {
-      return res.status(400).json({
-        message: "Invalid role",
-      });
-    }
-
-    /*
-      Only team creator can modify roles.
-    */
-
-    const team = await prisma.team.findFirst({
-      where: {
-        id: teamId,
-        createdById: userId,
-      },
-    });
-
-    if (!team) {
-      return res.status(403).json({
-        message: "Only the team creator can change member roles",
-      });
-    }
-
-    const member = await prisma.teamMember.findUnique({
-      where: {
-        teamId_userId: {
-          teamId,
-          userId: memberUserId,
-        },
-      },
-    });
-
-    if (!member) {
-      return res.status(404).json({
-        message: "Team member not found",
-      });
-    }
-
-    /*
-      Prevent changing the creator's own owner role.
-    */
-
-    if (memberUserId === team.createdById) {
-      return res.status(400).json({
-        message: "Team creator's role cannot be changed",
-      });
-    }
-
-    const updatedMember = await prisma.teamMember.update({
-      where: {
-        teamId_userId: {
-          teamId,
-          userId: memberUserId,
-        },
-      },
-
-      data: {
-        role,
-      },
-
-      select: {
-        id: true,
-        userId: true,
-        role: true,
-        joinedAt: true,
-
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
+          ledgerEntries: {
+            create: [
+              {
+                accountId: payableAccount.id,
+                debit: amount,
+                credit: "0",
+                description: "Settle employee reimbursement payable",
+              },
+              {
+                accountId: cashAccount.id,
+                debit: "0",
+                credit: amount,
+                description: "Reimbursement paid to employee",
+              },
+            ],
           },
         },
-      },
+        select: {
+          id: true,
+          transactionType: true,
+          referenceId: true,
+          createdAt: true,
+          ledgerEntries: {
+            select: {
+              accountId: true,
+              debit: true,
+              credit: true,
+            },
+          },
+        },
+      });
+
+      const updatedClaim = await tx.reimbursementClaim.findUnique({
+        where: {
+          id: claim.id,
+        },
+        select: {
+          id: true,
+          employeeId: true,
+          teamId: true,
+          amount: true,
+          description: true,
+          status: true,
+          updatedAt: true,
+        },
+      });
+
+      return {
+        claim: updatedClaim,
+        transaction,
+      };
     });
 
     return res.status(200).json({
-      message: "Team member role updated successfully",
-      member: updatedMember,
-    });
-
-  } catch (error) {
-    console.error("updateTeamMemberRole:", error);
-
-    return res.status(500).json({
-      message: "Failed to update member role",
+      success: true,
+      message: "Employee reimbursement paid successfully.",
+      data: result,
     });
   }
-};
+);
 
 
-/* =========================================================
-   REMOVE TEAM MEMBER
-   ========================================================= */
-
-const removeTeamMember = async (req, res) => {
-  try {
+const approveReimbursementClaim = asyncHandler(
+  async (req, res) => {
     const userId = getUserId(req);
-    const { teamId, memberUserId } = req.params;
+    const { orgId, claimId } = req.params;
 
     if (!userId) {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
+      throw new ApiError(
+        statusType.UNAUTHORIZED,
+        "Unauthorized."
+      );
     }
 
-    /*
-      Only creator can remove members.
-    */
+    if (!orgId || !claimId) {
+      throw new ApiError(
+        statusType.BAD_REQUEST,
+        "Organization ID and claim ID are required."
+      );
+    }
 
-    const team = await prisma.team.findFirst({
-      where: {
-        id: teamId,
-        createdById: userId,
-      },
+    // Only the organization owner can approve claims.
+    const organization = await prisma.organization.findUnique({
+      where: { id: orgId },
+      select: { id: true, createdById: true },
     });
 
-    if (!team) {
-      return res.status(403).json({
-        message: "Only the team creator can remove members",
-      });
+    if (!organization) {
+      throw new ApiError(
+        statusType.BAD_REQUEST,
+        "Organization not found."
+      );
     }
 
-    /*
-      Creator cannot remove themselves.
-    */
-
-    if (memberUserId === team.createdById) {
-      return res.status(400).json({
-        message: "Team creator cannot be removed",
-      });
+    if (organization.createdById !== userId) {
+      throw new ApiError(
+        statusType.FORBIDDEN,
+        "Only the organization owner can approve reimbursement claims."
+      );
     }
 
-    const member = await prisma.teamMember.findUnique({
-      where: {
-        teamId_userId: {
-          teamId,
-          userId: memberUserId,
+    const claim = await prisma.$transaction(async (tx) => {
+      const existingClaim =
+        await tx.reimbursementClaim.findFirst({
+          where: {
+            id: claimId,
+            organizationId: orgId,
+          },
+          select: {
+            id: true,
+            status: true,
+          },
+        });
+
+      if (!existingClaim) {
+        throw new ApiError(
+          statusType.BAD_REQUEST,
+          "Reimbursement claim not found."
+        );
+      }
+
+      if (existingClaim.status !== "PENDING") {
+        throw new ApiError(
+          statusType.BAD_REQUEST,
+          `Cannot approve a claim with status ${existingClaim.status}.`
+        );
+      }
+
+      // Conditional update prevents duplicate approvals.
+      const updated = await tx.reimbursementClaim.updateMany({
+        where: {
+          id: claimId,
+          organizationId: orgId,
+          status: "PENDING",
         },
-      },
-    });
-
-    if (!member) {
-      return res.status(404).json({
-        message: "Team member not found",
-      });
-    }
-
-    await prisma.teamMember.delete({
-      where: {
-        teamId_userId: {
-          teamId,
-          userId: memberUserId,
+        data: {
+          status: "APPROVED",
         },
-      },
+      });
+
+      if (updated.count !== 1) {
+        throw new ApiError(
+          statusType.BAD_REQUEST,
+          "Claim status changed. Please refresh and try again."
+        );
+      }
+
+      return tx.reimbursementClaim.findUnique({
+        where: { id: claimId },
+        select: {
+          id: true,
+          organizationId: true,
+          employeeId: true,
+          teamId: true,
+          amount: true,
+          description: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
     });
 
     return res.status(200).json({
-      message: "Team member removed successfully",
-    });
-
-  } catch (error) {
-    console.error("removeTeamMember:", error);
-
-    return res.status(500).json({
-      message: "Failed to remove team member",
+      success: true,
+      message: "Reimbursement claim approved successfully.",
+      data: claim,
     });
   }
-};
+);
 
+const rejectReimbursementClaim = asyncHandler(
+  async (req, res) => {
+    const userId = getUserId(req);
+    const { orgId, claimId } = req.params;
 
-/* =========================================================
-   EXPORT
-   ========================================================= */
+    if (!userId) {
+      throw new ApiError(
+        statusType.UNAUTHORIZED,
+        "Unauthorized."
+      );
+    }
+
+    if (!orgId || !claimId) {
+      throw new ApiError(
+        statusType.BAD_REQUEST,
+        "Organization ID and claim ID are required."
+      );
+    }
+
+    // Only the organization owner can reject claims.
+    const organization = await prisma.organization.findUnique({
+      where: { id: orgId },
+      select: { id: true, createdById: true },
+    });
+
+    if (!organization) {
+      throw new ApiError(
+        statusType.BAD_REQUEST,
+        "Organization not found."
+      );
+    }
+
+    if (organization.createdById !== userId) {
+      throw new ApiError(
+        statusType.FORBIDDEN,
+        "Only the organization owner can reject reimbursement claims."
+      );
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      // Find the claim within the requested organization.
+      const claim = await tx.reimbursementClaim.findFirst({
+        where: {
+          id: claimId,
+          organizationId: orgId,
+        },
+        select: {
+          id: true,
+          organizationId: true,
+          employeeId: true,
+          teamId: true,
+          amount: true,
+          description: true,
+          status: true,
+        },
+      });
+
+      if (!claim) {
+        throw new ApiError(
+          statusType.BAD_REQUEST,
+          "Reimbursement claim not found."
+        );
+      }
+
+      // Only pending claims can be rejected.
+      // An approved claim needs a separate cancellation/reversal workflow.
+      if (claim.status !== "PENDING") {
+        throw new ApiError(
+          statusType.BAD_REQUEST,
+          `Cannot reject a claim with status ${claim.status}.`
+        );
+      }
+
+      // Locate the original accounting transaction created
+      // when the reimbursement claim was submitted.
+      const originalTransaction =
+        await tx.transaction.findFirst({
+          where: {
+            organizationId: orgId,
+            referenceId: claim.id,
+            transactionType: "REIMBURSEMENT_CLAIM",
+          },
+          include: {
+            ledgerEntries: true,
+          },
+        });
+
+      if (
+        !originalTransaction ||
+        originalTransaction.ledgerEntries.length < 2
+      ) {
+        throw new ApiError(
+          statusType.BAD_REQUEST,
+          "The original claim ledger entries were not found. The claim cannot be safely rejected."
+        );
+      }
+
+      // Atomically transition PENDING -> REJECTED.
+      const updated = await tx.reimbursementClaim.updateMany({
+        where: {
+          id: claim.id,
+          organizationId: orgId,
+          status: "PENDING",
+        },
+        data: {
+          status: "REJECTED",
+        },
+      });
+
+      if (updated.count !== 1) {
+        throw new ApiError(
+          statusType.BAD_REQUEST,
+          "Claim status changed. Please refresh and try again."
+        );
+      }
+
+      // Reverse every original ledger entry.
+      // Original debit becomes reversal credit.
+      // Original credit becomes reversal debit.
+      const reversalTransaction =
+        await tx.transaction.create({
+          data: {
+            organizationId: orgId,
+            teamId: claim.teamId,
+            createdById: userId,
+            transactionType: "REIMBURSEMENT_REJECTION_REVERSAL",
+            description: `Reversal for rejected reimbursement claim ${claim.id}`,
+            referenceId: claim.id,
+
+            ledgerEntries: {
+              create: originalTransaction.ledgerEntries.map(
+                (entry) => ({
+                  accountId: entry.accountId,
+                  debit: entry.credit.toString(),
+                  credit: entry.debit.toString(),
+                  description:
+                    `Reversal of reimbursement claim ${claim.id}`,
+                })
+              ),
+            },
+          },
+          select: {
+            id: true,
+            transactionType: true,
+            referenceId: true,
+            createdAt: true,
+            ledgerEntries: {
+              select: {
+                accountId: true,
+                debit: true,
+                credit: true,
+              },
+            },
+          },
+        });
+
+      const updatedClaim =
+        await tx.reimbursementClaim.findUnique({
+          where: {
+            id: claim.id,
+          },
+          select: {
+            id: true,
+            employeeId: true,
+            teamId: true,
+            amount: true,
+            description: true,
+            status: true,
+            updatedAt: true,
+          },
+        });
+
+      return {
+        claim: updatedClaim,
+        reversalTransaction,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Reimbursement claim rejected and accounting entries reversed successfully.",
+      data: result,
+    });
+  }
+);
+
 
 export {
   getAllTeams,
@@ -962,8 +1454,16 @@ export {
   updateTeam,
   deleteTeam,
   getTeamMembers,
+  addTeamMember,
   sendTeamInvitationEmail,
   acceptInvitation,
   updateTeamMemberRole,
   removeTeamMember,
+
+  createTeamExpenseTransaction,
+
+  createReimbursementClaim,
+  payReimbursementClaim,
+  approveReimbursementClaim,
+  rejectReimbursementClaim
 };

@@ -79,6 +79,13 @@ export interface TeamDetail {
   };
 }
 
+export interface RemainingBudget {
+  team: { id: string; name: string };
+  budget: { total: number; currency: string };
+  spending: { spent: number };
+  remaining: number;
+}
+
 /* ---------- Create (POST /org/:orgId/teams) ---------- */
 
 export interface CreateTeamInput {
@@ -109,8 +116,9 @@ export interface CreateTeamResult {
  */
 export const getAllTeams = async (orgId: string): Promise<TeamListItem[]> => {
   const response = await apiClient.get<{ data: TeamListItem[] }>(
-    `/org/${orgId}/teams`
+    `/${encodeURIComponent(orgId)}/teams`
   );
+  if (response.error || !response.data) throw new Error(response.error || 'Could not load teams.');
   return response.data?.data ?? [];
 };
 
@@ -123,8 +131,9 @@ export const getOneTeam = async (
   teamId: string
 ): Promise<TeamDetail | null> => {
   const response = await apiClient.get<{ data: TeamDetail }>(
-    `/org/${orgId}/teams/${teamId}`
+    `/${encodeURIComponent(orgId)}/teams/${encodeURIComponent(teamId)}`
   );
+  if (response.error) throw new Error(response.error);
   return response.data?.data ?? null;
 };
 
@@ -137,8 +146,117 @@ export const createTeam = async (
   input: CreateTeamInput
 ): Promise<CreateTeamResult | null> => {
   const response = await apiClient.post<{ data: CreateTeamResult }>(
-    `/org/${orgId}/teams`,
+    `/${encodeURIComponent(orgId)}/teams`,
     input
   );
+  if (response.error) throw new Error(response.error);
   return response.data?.data ?? null;
+};
+
+interface TeamEnvelope<T> {
+  data: T;
+  message: string;
+}
+
+interface BudgetResponse {
+  data: { budget: TeamDetail['budget'] };
+  message: string;
+}
+
+const assertMutationSucceeded = <T>(
+  response: { data: T | null; error: string | null },
+  fallback: string
+): T => {
+  if (response.error || !response.data) {
+    throw new Error(response.error || fallback);
+  }
+  return response.data;
+};
+
+export const updateTeam = async (
+  orgId: string,
+  teamId: string,
+  name: string
+): Promise<void> => {
+  const response = await apiClient.patch<TeamEnvelope<unknown>>(
+    `/${encodeURIComponent(orgId)}/teams/${encodeURIComponent(teamId)}`,
+    { name }
+  );
+  assertMutationSucceeded(response, 'Could not update team.');
+};
+
+export const deleteTeam = async (orgId: string, teamId: string): Promise<void> => {
+  const response = await apiClient.delete<TeamEnvelope<null>>(
+    `/${encodeURIComponent(orgId)}/teams/${encodeURIComponent(teamId)}`
+  );
+  assertMutationSucceeded(response, 'Could not delete team.');
+};
+
+export const getTeamMembers = async (teamId: string): Promise<TeamMember[]> => {
+  const response = await apiClient.get<TeamEnvelope<TeamMember[]>>(
+    `/teams/${encodeURIComponent(teamId)}/members`
+  );
+  return assertMutationSucceeded(response, 'Could not load team members.').data;
+};
+
+export const addTeamMember = async (
+  teamId: string,
+  userId: string,
+  role: Exclude<TeamRole, 'owner'> = 'member'
+): Promise<TeamMember> => {
+  const response = await apiClient.post<TeamEnvelope<TeamMember>>(
+    `/teams/${encodeURIComponent(teamId)}/members`,
+    { userId, role }
+  );
+  return assertMutationSucceeded(response, 'Could not add team member.').data;
+};
+
+export const updateTeamMemberRole = async (
+  teamId: string,
+  userId: string,
+  role: Exclude<TeamRole, 'owner'>
+): Promise<TeamMember> => {
+  const response = await apiClient.patch<TeamEnvelope<TeamMember>>(
+    `/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(userId)}`,
+    { role }
+  );
+  return assertMutationSucceeded(response, 'Could not update team member role.').data;
+};
+
+export const removeTeamMember = async (teamId: string, userId: string): Promise<void> => {
+  const response = await apiClient.delete<TeamEnvelope<null>>(
+    `/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(userId)}`
+  );
+  assertMutationSucceeded(response, 'Could not remove team member.');
+};
+
+export const createTeamBudget = async (
+  teamId: string,
+  totalBudget: number,
+  currency = 'INR'
+): Promise<NonNullable<TeamDetail['budget']>> => {
+  const response = await apiClient.post<BudgetResponse>(
+    `/teams/${encodeURIComponent(teamId)}/budget`,
+    { totalBudget, currency }
+  );
+  return assertMutationSucceeded(response, 'Could not create team budget.').data.budget!;
+};
+
+export const updateTeamBudget = async (
+  teamId: string,
+  totalBudget: number,
+  currency: string
+): Promise<NonNullable<TeamDetail['budget']>> => {
+  const response = await apiClient.patch<BudgetResponse>(
+    `/teams/${encodeURIComponent(teamId)}/budget`,
+    { totalBudget, currency }
+  );
+  return assertMutationSucceeded(response, 'Could not update team budget.').data.budget!;
+};
+
+export const getRemainingBudget = async (teamId: string): Promise<RemainingBudget> => {
+  const response = await apiClient.get<TeamEnvelope<RemainingBudget>>(
+    `/teams/${encodeURIComponent(teamId)}/budget/remaining`
+  );
+  return assertMutationSucceeded(response, 'Could not load the remaining team budget.').data;
 };

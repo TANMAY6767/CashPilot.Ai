@@ -68,7 +68,8 @@ model Organization {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  @@index([createdById,name])
+  @@unique([createdById, name])
+@@index([createdById])
   @@map("organizations")
 }
 
@@ -105,13 +106,12 @@ model Team {
   budget              Budget?
   accounts            Account[]
   transactions        Transaction[]
-  // invitations         TeamInvitation[]
   reimbursementClaims ReimbursementClaim[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-
+  @@unique([organizationId, name])
   @@index([organizationId])
   @@index([createdById])
   @@map("teams")

@@ -1,370 +1,238 @@
 import prisma from "../prisma/client.js";
+import { ApiError } from "../utils/ApiError.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { sendResponse, statusType } from "../utils/index.js";
 
-const getUserId = (req) => req.user?._id;
+const getUserId = (req) => req.user?.sub;
 
-
-/* =========================================================
-   CREATE BUDGET
-   ========================================================= */
-
-const createBudget = async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const { teamId } = req.params;
-    const { totalBudget, currency = "INR" } = req.body;
-
-    if (!userId) {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
-    }
-
-    if (!teamId || totalBudget === undefined) {
-      return res.status(400).json({
-        message: "Team ID and total budget are required",
-      });
-    }
-
-    const amount = Number(totalBudget);
-
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return res.status(400).json({
-        message: "Total budget must be a positive number",
-      });
-    }
-
-    if (
-      typeof currency !== "string" ||
-      currency.length !== 3
-    ) {
-      return res.status(400).json({
-        message: "Currency must be a valid 3-letter code",
-      });
-    }
-
-    /*
-      Find the team and also verify that the
-      logged-in user is the team creator.
-    */
-
-    const team = await prisma.team.findFirst({
-      where: {
-        id: teamId,
-        createdById: userId,
-      },
-    });
-
-    if (!team) {
-      return res.status(403).json({
-        message: "Only the team creator can manage the budget",
-      });
-    }
-
-    /*
-      A team can have only ONE budget because:
-      teamId String @unique
-    */
-
-    const existingBudget = await prisma.budget.findUnique({
-      where: {
-        teamId,
-      },
-    });
-
-    if (existingBudget) {
-      return res.status(409).json({
-        message: "Budget already exists for this team",
-      });
-    }
-
-    const budget = await prisma.budget.create({
-      data: {
-        teamId,
-        totalBudget: amount,
-        currency: currency.toUpperCase(),
-      },
-
-      select: {
-        id: true,
-        teamId: true,
-        totalBudget: true,
-        currency: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-
-    return res.status(201).json({
-      message: "Budget created successfully",
-      budget,
-    });
-
-  } catch (error) {
-    console.error("createBudget:", error);
-
-    return res.status(500).json({
-      message: "Failed to create budget",
-    });
-  }
+const findOwnedTeam = async (teamId, userId) => {
+  if (!teamId) throw new ApiError(statusType.BAD_REQUEST, "Team ID is required.");
+  const team = await prisma.team.findFirst({
+    where: { id: teamId, createdById: userId },
+    select: { id: true },
+  });
+  if (!team) throw new ApiError(statusType.FORBIDDEN, "Only the team creator can manage this budget.");
+  return team;
 };
 
+const getBudget = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { teamId } = req.params;
+  if (!userId) throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized.");
+  if (!teamId) throw new ApiError(statusType.BAD_REQUEST, "Team ID is required.");
 
-/* =========================================================
-   GET BUDGET
-   ========================================================= */
+  const teamMember = await prisma.teamMember.findUnique({
+    where: { teamId_userId: { teamId, userId } },
+    select: { id: true },
+  });
+  if (!teamMember) throw new ApiError(statusType.FORBIDDEN, "You are not a member of this team.");
 
-const getBudget = async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const { teamId } = req.params;
+  const budget = await prisma.budget.findUnique({
+    where: { teamId },
+    select: { id: true, teamId: true, totalBudget: true, currency: true, createdAt: true, updatedAt: true },
+  });
+  if (!budget) throw new ApiError(statusType.NOT_FOUND, "Budget not found.");
 
-    if (!userId) {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
+  return sendResponse(res, "success", { budget }, "Budget fetched successfully.", statusType.OK);
+});
+
+const createBudget = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { teamId } = req.params;
+  const { totalBudget, currency = "INR" } = req.body ?? {};
+  if (!userId) throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized.");
+  await findOwnedTeam(teamId, userId);
+
+  const amount = Number(totalBudget);
+  if (totalBudget === undefined || !Number.isFinite(amount) || amount <= 0) {
+    throw new ApiError(statusType.BAD_REQUEST, "Total budget must be a positive number.");
+  }
+  if (typeof currency !== "string" || !/^[a-zA-Z]{3}$/.test(currency)) {
+    throw new ApiError(statusType.BAD_REQUEST, "Currency must be a valid 3-letter code.");
+  }
+  if (await prisma.budget.findUnique({ where: { teamId }, select: { id: true } })) {
+    throw new ApiError(statusType.CONFLICT, "Budget already exists for this team.");
+  }
+
+  const budget = await prisma.budget.create({
+    data: { teamId, totalBudget: amount, currency: currency.toUpperCase() },
+    select: { id: true, teamId: true, totalBudget: true, currency: true, createdAt: true, updatedAt: true },
+  });
+  return sendResponse(res, "success", { budget }, "Budget created successfully.", statusType.CREATED);
+});
+
+const updateBudget = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { teamId } = req.params;
+  const { totalBudget, currency } = req.body ?? {};
+  if (!userId) throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized.");
+  await findOwnedTeam(teamId, userId);
+
+  const data = {};
+  if (totalBudget !== undefined) {
+    const amount = Number(totalBudget);
+    if (!Number.isFinite(amount) || amount <= 0) throw new ApiError(statusType.BAD_REQUEST, "Total budget must be a positive number.");
+    data.totalBudget = amount;
+  }
+  if (currency !== undefined) {
+    if (typeof currency !== "string" || !/^[a-zA-Z]{3}$/.test(currency)) {
+      throw new ApiError(statusType.BAD_REQUEST, "Currency must be a valid 3-letter code.");
     }
+    data.currency = currency.toUpperCase();
+  }
+  if (Object.keys(data).length === 0) throw new ApiError(statusType.BAD_REQUEST, "Provide a budget amount or currency to update.");
+  if (!(await prisma.budget.findUnique({ where: { teamId }, select: { id: true } }))) {
+    throw new ApiError(statusType.NOT_FOUND, "Budget not found.");
+  }
 
-    /*
-      User must be a member of the team.
-    */
+  const budget = await prisma.budget.update({
+    where: { teamId },
+    data,
+    select: { id: true, teamId: true, totalBudget: true, currency: true, createdAt: true, updatedAt: true },
+  });
+  return sendResponse(res, "success", { budget }, "Budget updated successfully.", statusType.OK);
+});
 
-    const teamMember = await prisma.teamMember.findUnique({
-      where: {
-        teamId_userId: {
-          teamId,
-          userId,
+const deleteBudget = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { teamId } = req.params;
+  if (!userId) throw new ApiError(statusType.UNAUTHORIZED, "Unauthorized.");
+  await findOwnedTeam(teamId, userId);
+
+  if (!(await prisma.budget.findUnique({ where: { teamId }, select: { id: true } }))) {
+    throw new ApiError(statusType.NOT_FOUND, "Budget not found.");
+  }
+  await prisma.budget.delete({ where: { teamId } });
+  return sendResponse(res, "success", null, "Budget deleted successfully.", statusType.OK);
+});
+
+const getRemainingBudget = asyncHandler(async (req, res) => {
+  const userId = getUserId(req);
+  const { teamId } = req.params;
+
+  if (!userId) {
+    throw new ApiError(
+      statusType.UNAUTHORIZED,
+      "Unauthorized."
+    );
+  }
+
+  if (!teamId) {
+    throw new ApiError(
+      statusType.BAD_REQUEST,
+      "Team ID is required."
+    );
+  }
+
+  const team = await prisma.team.findUnique({
+    where: {
+      id: teamId,
+    },
+    select: {
+      id: true,
+      name: true,
+      organizationId: true,
+
+      budget: {
+        select: {
+          id: true,
+          totalBudget: true,
+          currency: true,
         },
       },
-    });
+    },
+  });
 
-    if (!teamMember) {
-      return res.status(403).json({
-        message: "You are not a member of this team",
-      });
-    }
-
-    const budget = await prisma.budget.findUnique({
-      where: {
-        teamId,
-      },
-
-      select: {
-        id: true,
-        teamId: true,
-        totalBudget: true,
-        currency: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-
-    if (!budget) {
-      return res.status(404).json({
-        message: "Budget not found",
-      });
-    }
-
-    return res.status(200).json({
-      message: "Budget fetched successfully",
-      budget,
-    });
-
-  } catch (error) {
-    console.error("getBudget:", error);
-
-    return res.status(500).json({
-      message: "Failed to get budget",
-    });
+  if (!team) {
+    throw new ApiError(
+      statusType.NOT_FOUND,
+      "Team not found."
+    );
   }
-};
 
-
-/* =========================================================
-   UPDATE BUDGET
-   ========================================================= */
-
-const updateBudget = async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const { teamId } = req.params;
-    const { totalBudget, currency } = req.body;
-
-    if (!userId) {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
-    }
-
-    /*
-      Only team creator can update budget.
-    */
-
-    const team = await prisma.team.findFirst({
-      where: {
-        id: teamId,
-        createdById: userId,
-      },
-    });
-
-    if (!team) {
-      return res.status(403).json({
-        message: "Only the team creator can update the budget",
-      });
-    }
-
-    /*
-      Make sure budget exists.
-    */
-
-    const existingBudget = await prisma.budget.findUnique({
-      where: {
+  const teamMember = await prisma.teamMember.findUnique({
+    where: {
+      teamId_userId: {
         teamId,
+        userId,
       },
-    });
+    },
+    select: {
+      id: true,
+    },
+  });
 
-    if (!existingBudget) {
-      return res.status(404).json({
-        message: "Budget not found",
-      });
-    }
-
-    /*
-      Build update object only with fields
-      actually provided.
-    */
-
-    const data = {};
-
-    if (totalBudget !== undefined) {
-      const amount = Number(totalBudget);
-
-      if (!Number.isFinite(amount) || amount <= 0) {
-        return res.status(400).json({
-          message: "Total budget must be a positive number",
-        });
-      }
-
-      data.totalBudget = amount;
-    }
-
-    if (currency !== undefined) {
-      if (
-        typeof currency !== "string" ||
-        currency.length !== 3
-      ) {
-        return res.status(400).json({
-          message: "Currency must be a valid 3-letter code",
-        });
-      }
-
-      data.currency = currency.toUpperCase();
-    }
-
-    if (Object.keys(data).length === 0) {
-      return res.status(400).json({
-        message: "No fields provided for update",
-      });
-    }
-
-    const budget = await prisma.budget.update({
-      where: {
-        teamId,
+  const organizationOwner = await prisma.organizationMember.findUnique({
+    where: {
+      organizationId_userId: {
+        organizationId: team.organizationId,
+        userId,
       },
+    },
+    select: { role: true },
+  });
 
-      data,
-
-      select: {
-        id: true,
-        teamId: true,
-        totalBudget: true,
-        currency: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-
-    return res.status(200).json({
-      message: "Budget updated successfully",
-      budget,
-    });
-
-  } catch (error) {
-    console.error("updateBudget:", error);
-
-    return res.status(500).json({
-      message: "Failed to update budget",
-    });
+  if (!teamMember && organizationOwner?.role !== "owner") {
+    throw new ApiError(
+      statusType.FORBIDDEN,
+      "You are not a member of this team."
+    );
   }
-};
 
-
-/* =========================================================
-   DELETE BUDGET
-   ========================================================= */
-
-const deleteBudget = async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    const { teamId } = req.params;
-
-    if (!userId) {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
-    }
-
-    /*
-      Only team creator can delete budget.
-    */
-
-    const team = await prisma.team.findFirst({
-      where: {
-        id: teamId,
-        createdById: userId,
-      },
-    });
-
-    if (!team) {
-      return res.status(403).json({
-        message: "Only the team creator can delete the budget",
-      });
-    }
-
-    const budget = await prisma.budget.findUnique({
-      where: {
-        teamId,
-      },
-    });
-
-    if (!budget) {
-      return res.status(404).json({
-        message: "Budget not found",
-      });
-    }
-
-    await prisma.budget.delete({
-      where: {
-        teamId,
-      },
-    });
-
-    return res.status(200).json({
-      message: "Budget deleted successfully",
-    });
-
-  } catch (error) {
-    console.error("deleteBudget:", error);
-
-    return res.status(500).json({
-      message: "Failed to delete budget",
-    });
+  if (!team.budget) {
+    throw new ApiError(
+      statusType.NOT_FOUND,
+      "Budget not found."
+    );
   }
-};
 
+  const totals = await prisma.ledgerEntry.aggregate({
+    where: {
+      account: {
+        organizationId: team.organizationId,
+        teamId: team.id,
+        accountType: "expense",
+      },
+    },
 
-export {
-  createBudget,
-  getBudget,
-  updateBudget,
-  deleteBudget,
-};
+    _sum: {
+      debit: true,
+      credit: true,
+    },
+  });
+
+  const totalDebit = Number(totals._sum.debit ?? 0);
+  const totalCredit = Number(totals._sum.credit ?? 0);
+
+  const spent = totalDebit - totalCredit;
+
+  const budget = Number(team.budget.totalBudget);
+
+  const remaining = budget - spent;
+
+  return sendResponse(
+    res,
+    "success",
+    {
+      team: {
+        id: team.id,
+        name: team.name,
+      },
+
+      budget: {
+        total: budget,
+        currency: team.budget.currency,
+      },
+
+      spending: {
+        spent,
+      },
+
+      remaining,
+    },
+    "Remaining budget fetched successfully.",
+    statusType.OK
+  );
+});
+
+export { createBudget, getBudget, updateBudget, deleteBudget,getRemainingBudget };
