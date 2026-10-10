@@ -196,12 +196,12 @@ export const deleteTeam = async (orgId: string, teamId: string): Promise<void> =
   assertMutationSucceeded(response, 'Could not delete team.');
 };
 
-export const getTeamMembers = async (teamId: string): Promise<TeamMember[]> => {
-  const response = await apiClient.get<TeamEnvelope<TeamMember[]>>(
-    `/teams/${encodeURIComponent(teamId)}/members`
-  );
-  return assertMutationSucceeded(response, 'Could not load team members.').data;
-};
+// export const getTeamMembers = async (teamId: string): Promise<TeamMember[]> => {
+//   const response = await apiClient.get<TeamEnvelope<TeamMember[]>>(
+//     `/teams/${encodeURIComponent(teamId)}/members`
+//   );
+//   return assertMutationSucceeded(response, 'Could not load team members.').data;
+// };
 
 export const addTeamMember = async (
   teamId: string,

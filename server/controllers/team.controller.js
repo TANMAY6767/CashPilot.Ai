@@ -1088,13 +1088,14 @@ const payReimbursementClaim = asyncHandler(
           organizationId: orgId,
           teamId: null,
           accountType: "asset",
-          name: "Financial Cash Account",
+          name: "Financial cash Account",
         },
         select: {
           id: true,
         },
       });
-
+      console.log("payableAccount: ",payableAccount)
+      console.log("cashAccount: ",cashAccount)
       if (!payableAccount || !cashAccount) {
         throw new ApiError(
           statusType.BAD_REQUEST,
